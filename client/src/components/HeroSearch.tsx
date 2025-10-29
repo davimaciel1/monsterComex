@@ -2,6 +2,7 @@ import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
+import logoImage from "@assets/ChatGPT Image 29 de out. de 2025, 15_48_19_1761764314671.png";
 
 interface HeroSearchProps {
   onSearch?: (query: string) => void;
@@ -22,6 +23,14 @@ export function HeroSearch({ onSearch }: HeroSearchProps) {
     <div className="py-20 md:py-32 px-4">
       <div className="max-w-4xl mx-auto text-center space-y-8">
         <div className="space-y-4">
+          <div className="flex justify-center mb-6">
+            <img 
+              src={logoImage} 
+              alt="Trade Radar Logo" 
+              className="w-48 h-48 object-contain"
+              data-testid="img-logo"
+            />
+          </div>
           <h1 className="text-3xl md:text-5xl font-bold" data-testid="text-hero-title">
             Encontre Qualquer Importador ou Exportador
           </h1>
