@@ -23,11 +23,6 @@ export function Header({ onSearch, compact = false }: HeaderProps) {
     <header className="sticky top-0 z-50 border-b bg-background">
       <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-4">
-          <div className="flex items-center gap-2">
-            <Anchor className="h-6 w-6 text-primary" data-testid="logo-icon" />
-            <span className="text-xl font-bold" data-testid="text-app-name">Trade Radar</span>
-          </div>
-
           {compact && (
             <form onSubmit={handleSearch} className="flex-1 max-w-xl">
               <div className="relative">
