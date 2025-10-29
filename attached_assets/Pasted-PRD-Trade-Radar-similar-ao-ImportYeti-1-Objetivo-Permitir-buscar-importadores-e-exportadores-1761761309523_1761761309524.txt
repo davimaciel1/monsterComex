@@ -1,0 +1,513 @@
+PRD — “Trade Radar” (similar ao ImportYeti)
+1) Objetivo
+
+Permitir buscar importadores e exportadores e visualizar seus embarques marítimos (histórico, KPIs, gráficos, top parceiros/portos/países/HS) a partir de arquivos Excel/CSV ingeridos apenas pelo administrador. Os dados ficam persistidos em Postgres.
+
+2) Personas
+
+Analista/Compras: descobre fornecedores e volume por período.
+
+Trader/Comex: filtra por HS/porto/país e analisa sazonalidade.
+
+Diretoria: acompanha indicadores (embarques/mês, TEUs, peso).
+
+3) Requisitos Funcionais (v1)
+
+Busca global (barra central) por nome de empresa (importador/exportador); fuzzy match tolerante a variações (“LTDA”, “CO.” etc.).
+
+Página da empresa com:
+
+KPIs: nº embarques, TEUs, peso bruto total, nº parceiros.
+
+Gráfico “Shipments over time” (mensal).
+
+Top parceiros (importer↔exporter), top países de origem, top portos destino, top HS Codes.
+
+Tabela filtrável de embarques (período, HS, país/porto).
+
+Exportar CSV filtrado.
+
+Página de resultado de busca (lista de empresas encontradas por similaridade).
+
+Somente Admin:
+
+Área /admin protegida por login (role=admin).
+
+Upload de Excel/CSV.
+
+Visualizar histórico de ingestões (status, linhas OK/erro, log).
+
+Reprocessar/descartar uma ingestão.
+
+Deduplicação & Normalização na ingestão:
+
+Canonização de nomes de empresas (normalização + pg_trgm).
+
+Mapeamento de países para ISO-3166 e de portos (preferir UN/LOCODE).
+
+Geração de chave única de embarque (hash determinístico).
+
+Autorização:
+
+Visitantes/usuários: navegam e pesquisam.
+
+Apenas admin vê e usa /admin/upload.
+
+4) Requisitos Não-Funcionais
+
+Postgres 14+ com extensões pg_trgm e (opcional) postgis.
+
+Resposta de busca < 300 ms (com índices e cache).
+
+Uploads até 50 MB por arquivo (configurável).
+
+Observabilidade básica: logs de ingestão e contador de erros por arquivo.
+
+5) Fluxos Principais
+5.1 Busca
+
+Usuário digita “ACME” → endpoint /search?q=acme.
+
+Retorna empresas (importers/exporters) por similaridade trigram (score).
+
+Ao clicar numa empresa → /company/:id.
+
+5.2 Página da Empresa
+
+Carrega KPIs e séries temporais por company_id.
+
+Lista “Top partners / countries / ports / HS”.
+
+Tabela de embarques com paginação e filtros.
+
+Botão Export CSV do resultado filtrado.
+
+5.3 Upload (somente admin)
+
+Admin acessa /admin/upload.
+
+Envia Excel/CSV. O backend:
+
+Salva o arquivo (S3 ou disco).
+
+Cria registro em ingestions (status='queued', checksum).
+
+Dispara job de ETL assíncrono.
+
+Job lê planilha (biblioteca xlsx/pandas), valida cabeçalhos, normaliza colunas, e executa:
+
+UPSERT de empresas/portos/HS em suas dimensões.
+
+INSERT em shipments com shipment_uid (hash) + ON CONFLICT DO NOTHING para dedup.
+
+Atualiza contadores rows_total/ok/failed e status=done|failed.
+
+Armazena amostras de erros em ingestion_errors.
+
+Importante: o usuário final do app NÃO vê /admin e NÃO tem acesso a upload.
+
+Banco de Dados — Schema (PostgreSQL)
+
+Execute na ordem. Adapte nomes de schema conforme necessário.
+
+Extensões e helpers
+create extension if not exists pg_trgm;
+-- Opcional para mapas depois:
+-- create extension if not exists postgis;
+
+Tabela de usuários (admin)
+create table users (
+  id bigserial primary key,
+  email text unique not null,
+  password_hash text not null,
+  role text not null check (role in ('admin','user')),
+  created_at timestamptz default now()
+);
+-- seed: insira manualmente o admin (hash bcrypt/argon2)
+
+Países / Portos / HS
+create table countries (
+  code char(2) primary key,   -- ISO-3166-1 alpha-2
+  name text not null
+);
+
+create table ports (
+  id bigserial primary key,
+  name text not null,
+  normalized_name text generated always as (
+    regexp_replace(upper(name), '[^A-Z0-9 ]', '', 'g')
+  ) stored,
+  unlocode text,              -- se disponível
+  country_code char(2) references countries(code),
+  latitude double precision,
+  longitude double precision,
+  unique (unlocode)
+);
+create index on ports using gin (normalized_name gin_trgm_ops);
+
+create table port_aliases (
+  id bigserial primary key,
+  port_id bigint references ports(id) on delete cascade,
+  alias text not null,
+  normalized_alias text generated always as (
+    regexp_replace(upper(alias), '[^A-Z0-9 ]', '', 'g')
+  ) stored
+);
+create index on port_aliases using gin (normalized_alias gin_trgm_ops);
+
+create table hs_codes (
+  code text primary key,
+  description text
+);
+
+Empresas e aliases
+create table companies (
+  id bigserial primary key,
+  name text not null,
+  normalized_name text generated always as (
+    regexp_replace(upper(name), '( LTDA| LIMITED| LTD| CO| S A| S\\.A\\.| INC| LLC| GROUP| INDUSTRIA| IND| EIRELI| ME| EPP|\\.|,|\\(|\\))', '', 'g')
+  ) stored,
+  kind text not null check (kind in ('importer','exporter','forwarder','carrier','notify','other')),
+  country_code char(2) references countries(code),
+  created_at timestamptz default now()
+);
+create index on companies using gin (normalized_name gin_trgm_ops);
+
+create table company_aliases (
+  id bigserial primary key,
+  company_id bigint references companies(id) on delete cascade,
+  alias text not null,
+  normalized_alias text generated always as (
+    regexp_replace(upper(alias), '( LTDA| LIMITED| LTD| CO| S A| S\\.A\\.| INC| LLC| GROUP| INDUSTRIA| IND| EIRELI| ME| EPP|\\.|,|\\(|\\))', '', 'g')
+  ) stored
+);
+create index on company_aliases using gin (normalized_alias gin_trgm_ops);
+
+Ingestões e erros
+create table ingestions (
+  id bigserial primary key,
+  filename text not null,
+  mime_type text,
+  storage_url text,           -- S3 ou caminho local
+  checksum text,              -- md5/sha256 do arquivo
+  uploader_id bigint references users(id),
+  status text not null check (status in ('queued','processing','done','failed','canceled')),
+  rows_total int default 0,
+  rows_ok int default 0,
+  rows_failed int default 0,
+  started_at timestamptz,
+  finished_at timestamptz,
+  notes text,
+  created_at timestamptz default now()
+);
+
+create table ingestion_errors (
+  id bigserial primary key,
+  ingestion_id bigint references ingestions(id) on delete cascade,
+  row_number int,
+  error_code text,
+  error_message text,
+  raw_payload jsonb,
+  created_at timestamptz default now()
+);
+create index on ingestion_errors (ingestion_id);
+
+Embarques (fato)
+create table shipments (
+  id bigserial primary key,
+
+  shipment_uid text not null,          -- hash determinístico para dedup
+  shipment_no text,                    -- EMBARQUE/BL
+  ets date,
+  eta date,
+  cargo_type text,
+
+  importer_id bigint references companies(id),
+  exporter_id bigint references companies(id),
+  forwarder_id bigint references companies(id),
+  carrier_id bigint references companies(id),
+
+  loading_port_id bigint references ports(id),
+  discharge_port_id bigint references ports(id),
+  destination_port_id bigint references ports(id),
+
+  hs_code text references hs_codes(code),
+  teus numeric,
+  containers numeric,
+  gross_weight_kg numeric,
+  volumes numeric,
+
+  loading_country char(2) references countries(code),
+  -- opcional: discharge_country, destination_country
+
+  ingestion_id bigint references ingestions(id), -- rastreabilidade
+  raw_row_hash text,                             -- md5 da linha original (auditoria)
+  created_at timestamptz default now()
+);
+
+create unique index on shipments (shipment_uid);
+create index on shipments (eta, ets);
+create index on shipments (importer_id);
+create index on shipments (exporter_id);
+create index on shipments (hs_code);
+
+Como gerar shipment_uid
+
+Use um hash estável com os principais campos (ignorando diferenças cosméticas):
+
+shipment_uid = md5(
+  upper(trim(shipment_no)) || '|' ||
+  coalesce(to_char(ets,'YYYY-MM-DD'),'') || '|' ||
+  coalesce(to_char(eta,'YYYY-MM-DD'),'') || '|' ||
+  importer_id || '|' || exporter_id || '|' ||
+  loading_port_id || '|' || coalesce(destination_port_id, discharge_port_id)
+)
+
+
+No worker (ETL), calcule isso após resolver company_id e port_id.
+
+(Opcional) Visualizações/materialized views
+create materialized view mv_company_monthly as
+select
+  c.id as company_id,
+  date_trunc('month', coalesce(s.ets, s.eta))::date as month,
+  count(*) as shipments,
+  sum(coalesce(s.teus,0)) as teus,
+  sum(coalesce(s.gross_weight_kg,0)) as gross_weight_kg
+from shipments s
+join companies c on c.id in (s.importer_id, s.exporter_id)
+group by 1,2;
+
+create index on mv_company_monthly (company_id, month);
+
+ETL — Deduplicação e Normalização
+Regras de normalização
+
+Empresa: normalize(name) → UPPER → remove pontuação e sufixos frequentes (LTDA/LTD/INC/LLC/SA/CO/IND/EIRELI/ME/EPP/“.”/“,”/parênteses).
+
+Países: mapear nomes (ex: “Brasil”, “BRASIL”, “BRAZIL”) → BR. Tabela countries como dicionário.
+
+Portos: tentar match por UN/LOCODE quando existir; senão, por nome normalizado + país. Guardar aliases encontrados.
+
+Datas: parse ETS/ETA (DD/MM/AAAA, MM/DD/YYYY, etc.).
+
+Numéricos: converter TEUs, containers, gross_weight_kg, volumes.
+
+Deduplicação
+
+Empresas:
+
+Buscar por normalized_name com pg_trgm, similarity > 0.9.
+
+Se achar, usar company_id; se não, criar e registrar company_aliases.
+
+Portos:
+
+Se UN/LOCODE presente → unique.
+
+Senão, buscar por (normalized_name, country) com trigram; se ~igual, reutiliza; senão cria.
+
+Embarques: shipment_uid único (ver fórmula acima) + ON CONFLICT DO NOTHING.
+
+Validação mínima por linha
+
+Pelo menos UM entre importer_name e exporter_name.
+
+Pelo menos UM entre loading_port e discharge/destination_port.
+
+Rejeite linha se todos os campos essenciais faltarem → registrar em ingestion_errors.
+
+API — Endpoints (v1)
+Público
+
+GET /api/search?q=acme&kind=any|importer|exporter&limit=20
+Retorna { id, name, kind, country_code, score }.
+
+GET /api/company/:id/summary?from=YYYY-MM-DD&to=YYYY-MM-DD
+KPIs + séries mensais.
+
+GET /api/company/:id/tops?by=partners|countries|ports|hs&limit=15
+
+GET /api/company/:id/shipments?filters...&page=1&pageSize=50
+
+GET /api/company/:id/export.csv?filters... (content-disposition)
+
+Admin (JWT/Session + role=admin)
+
+POST /api/admin/upload — multipart/form-data (file)
+→ cria ingestions (status queued) e devolve ingestion_id.
+
+GET /api/admin/ingestions — lista com status e contadores.
+
+GET /api/admin/ingestions/:id — detalhes + erros.
+
+POST /api/admin/ingestions/:id/reprocess — refile / re-run.
+
+POST /api/admin/ingestions/:id/cancel
+
+Auth: NextAuth/Clerk/Auth0; RBAC simples via users.role. Bloqueie /admin/* por middleware.
+
+UI/UX — Layout (inspirado no ImportYeti)
+Paleta & componentes
+
+Stack: Next.js + Tailwind + shadcn/ui + Recharts/Plotly.
+
+Home:
+
+Logo e barra de busca central (“Find any importer/exporter”) + botão 🔍.
+
+CTA “Random Company” (opcional).
+
+Resultados da busca:
+
+Lista de cards com Nome, tipo (importer/exporter), país e score.
+
+Página da empresa:
+
+Header com: Nome (com badge IMPORTER/EXPORTER), país, #parceiros.
+
+KPIs (cards): Shipments, TEUs, Peso (kg), Containers.
+
+Gráfico “Shipments over time” (barra/linha mensal).
+
+3 colunas de rankings: Top Partners | Top Origin Countries | Top Destination Ports.
+
+Bloco HS Codes (top 10).
+
+Tabela de embarques (filtros: período, HS, país, porto; paginação; botão Export CSV).
+
+/admin/upload (somente admin):
+
+Dropzone (arrastar/soltar .xlsx/.csv).
+
+Select “mapeamento de colunas” (se precisar sobrescrever).
+
+Botão Enviar → barra de progresso.
+
+Tabela de Ingestões: arquivo, data, status, linhas OK/erro, link “Ver erros”.
+
+Upload/ETL — Pseudo-código (Node.js + BullMQ)
+// POST /api/admin/upload
+import formidable from 'formidable';
+import { putObject } from './s3'; // ou filesystem
+import { sql } from './db';
+import { queue } from './queue'; // BullMQ
+
+export default async function handler(req, res) {
+  assertAdmin(req.user);
+
+  const { file, filename, mimetype, buffer } = await parseFormidable(req);
+  const checksum = md5(buffer);
+  const storage_url = await putObject(`ingestions/${checksum}-${filename}`, buffer);
+
+  const { rows } = await sql`
+    insert into ingestions (filename, mime_type, storage_url, checksum, uploader_id, status)
+    values (${filename}, ${mimetype}, ${storage_url}, ${checksum}, ${req.user.id}, 'queued')
+    returning id
+  `;
+  await queue.add('ingest', { ingestion_id: rows[0].id });
+
+  res.json({ ingestion_id: rows[0].id });
+}
+
+// Worker (BullMQ)
+import xlsx from 'xlsx';
+import { sql } from './db';
+import { fetchObject } from './s3';
+import { normalizeCompany, normalizePort, hashShipment } from './normalize';
+
+queue.process('ingest', async (job) => {
+  const { ingestion_id } = job.data;
+  await sql`update ingestions set status='processing', started_at=now() where id=${ingestion_id}`;
+
+  const file = await fetchObject(/* storage_url from DB */);
+  const wb = xlsx.read(file, { type: 'buffer' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = xlsx.utils.sheet_to_json(ws, { defval: null });
+
+  let ok = 0, failed = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = mapColumns(rows[i]); // mapeia cabeçalhos do seu Excel para campos canônicos
+    try {
+      const importerId = await upsertCompany(r.importer_name, 'importer', r.importer_country);
+      const exporterId = await upsertCompany(r.exporter_name, 'exporter', r.exporter_country);
+      const loadPortId  = await upsertPort(r.loading_port, r.loading_country);
+      const destPortId  = await upsertPort(r.destination_port, r.destination_country);
+
+      const uid = hashShipment({
+        shipment_no: r.shipment_no, ets: r.ets, eta: r.eta,
+        importerId, exporterId, loadPortId, destPortId
+      });
+
+      await sql`
+        insert into shipments (
+          shipment_uid, shipment_no, ets, eta, cargo_type,
+          importer_id, exporter_id, forwarder_id, carrier_id,
+          loading_port_id, destination_port_id, hs_code,
+          teus, containers, gross_weight_kg, volumes,
+          loading_country, ingestion_id, raw_row_hash
+        )
+        values (
+          ${uid}, ${r.shipment_no}, ${r.ets}, ${r.eta}, ${r.cargo_type},
+          ${importerId}, ${exporterId}, ${null}, ${null},
+          ${loadPortId}, ${destPortId}, ${r.hs_code},
+          ${r.teus}, ${r.containers}, ${r.gross_weight_kg}, ${r.volumes},
+          ${r.loading_country}, ${ingestion_id}, ${md5(JSON.stringify(r))}
+        )
+        on conflict (shipment_uid) do nothing
+      `;
+      ok++;
+    } catch (e) {
+      failed++;
+      await sql`
+        insert into ingestion_errors (ingestion_id, row_number, error_code, error_message, raw_payload)
+        values (${ingestion_id}, ${i+1}, ${e.code || 'ERR'}, ${String(e)}, ${rows[i]})
+      `;
+    }
+  }
+
+  await sql`
+    update ingestions
+    set status='done', rows_total=${ok+failed}, rows_ok=${ok}, rows_failed=${failed}, finished_at=now()
+    where id=${ingestion_id}
+  `;
+});
+
+Segurança & Acesso
+
+Auth: NextAuth (Credentials) + hash bcrypt/argon2.
+
+RBAC: middleware em /admin/* → role=admin.
+
+Upload size limit e validação de extensão (.xlsx, .csv).
+
+Auditoria: ingestions, ingestion_errors, raw_row_hash.
+
+Deploy sugerido
+
+Backend/Frontend: Next.js (Vercel, Coolify, Docker).
+
+DB: Postgres gerenciado (Railway/Supabase/RDS).
+
+Queue: Redis (BullMQ) – gerenciado (Upstash/Redis Cloud).
+
+Storage: S3 compatível (Wasabi/MinIO/Supabase Storage).
+
+Checklist de Implementação
+
+ Criar DB e executar DDL acima (com pg_trgm).
+
+ Seed de users com admin.
+
+ Implementar /admin/upload (UI + endpoint + fila).
+
+ Implementar worker de ingestão (ETL, normalização, dedup).
+
+ Implementar /search (trigram).
+
+ Implementar /company/:id (summary/tops/shipments/export).
+
+ Replicar layout do ImportYeti (home, company page, rankings).
+
+ Logs/observabilidade simples na página de Ingestões.
