@@ -13,7 +13,7 @@ interface ShipmentsChartProps {
 export function ShipmentsChart({ data }: ShipmentsChartProps) {
   return (
     <Card className="p-6" data-testid="card-shipments-chart">
-      <h2 className="text-2xl font-semibold mb-6">Shipments Over Time</h2>
+      <h2 className="text-2xl font-semibold mb-6">Embarques ao Longo do Tempo</h2>
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data}>

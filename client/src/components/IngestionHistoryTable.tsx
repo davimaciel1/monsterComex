@@ -21,29 +21,29 @@ interface IngestionHistoryTableProps {
 }
 
 const statusConfig = {
-  queued: { label: 'Queued', variant: 'secondary' as const, icon: Clock },
-  processing: { label: 'Processing', variant: 'default' as const, icon: RefreshCw },
-  done: { label: 'Done', variant: 'default' as const, icon: CheckCircle },
-  failed: { label: 'Failed', variant: 'destructive' as const, icon: XCircle },
-  canceled: { label: 'Canceled', variant: 'secondary' as const, icon: AlertCircle },
+  queued: { label: 'Na Fila', variant: 'secondary' as const, icon: Clock },
+  processing: { label: 'Processando', variant: 'default' as const, icon: RefreshCw },
+  done: { label: 'Concluído', variant: 'default' as const, icon: CheckCircle },
+  failed: { label: 'Falhou', variant: 'destructive' as const, icon: XCircle },
+  canceled: { label: 'Cancelado', variant: 'secondary' as const, icon: AlertCircle },
 };
 
 export function IngestionHistoryTable({ ingestions, onViewErrors, onReprocess, onCancel }: IngestionHistoryTableProps) {
   return (
     <Card className="p-6" data-testid="card-ingestion-history">
-      <h2 className="text-2xl font-semibold mb-6">Ingestion History</h2>
+      <h2 className="text-2xl font-semibold mb-6">Histórico de Ingestões</h2>
       
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr className="border-b">
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Filename</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Upload Date</th>
+              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Arquivo</th>
+              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Data de Envio</th>
               <th className="text-left p-3 text-sm font-medium text-muted-foreground">Status</th>
-              <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total Rows</th>
-              <th className="text-right p-3 text-sm font-medium text-muted-foreground">Rows OK</th>
-              <th className="text-right p-3 text-sm font-medium text-muted-foreground">Rows Failed</th>
-              <th className="text-right p-3 text-sm font-medium text-muted-foreground">Actions</th>
+              <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total Linhas</th>
+              <th className="text-right p-3 text-sm font-medium text-muted-foreground">Linhas OK</th>
+              <th className="text-right p-3 text-sm font-medium text-muted-foreground">Linhas Falhas</th>
+              <th className="text-right p-3 text-sm font-medium text-muted-foreground">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -84,7 +84,7 @@ export function IngestionHistoryTable({ ingestions, onViewErrors, onReprocess, o
                           }}
                           data-testid={`button-view-errors-${ingestion.id}`}
                         >
-                          View Errors
+                          Ver Erros
                         </Button>
                       )}
                       {ingestion.status === 'failed' && (
@@ -97,7 +97,7 @@ export function IngestionHistoryTable({ ingestions, onViewErrors, onReprocess, o
                           }}
                           data-testid={`button-reprocess-${ingestion.id}`}
                         >
-                          Reprocess
+                          Reprocessar
                         </Button>
                       )}
                       {(ingestion.status === 'queued' || ingestion.status === 'processing') && (
@@ -110,7 +110,7 @@ export function IngestionHistoryTable({ ingestions, onViewErrors, onReprocess, o
                           }}
                           data-testid={`button-cancel-${ingestion.id}`}
                         >
-                          Cancel
+                          Cancelar
                         </Button>
                       )}
                     </div>

@@ -10,12 +10,14 @@ interface KPICardProps {
 
 export function KPICard({ title, value, icon: Icon, description }: KPICardProps) {
   return (
-    <Card className="p-6" data-testid={`card-kpi-${title.toLowerCase().replace(/\s+/g, '-')}`}>
+    <Card className="p-6 hover-elevate transition-all" data-testid={`card-kpi-${title.toLowerCase().replace(/\s+/g, '-')}`}>
       <div className="flex items-start justify-between mb-4">
         <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
           {title}
         </div>
-        <Icon className="h-5 w-5 text-muted-foreground" />
+        <div className="p-2 rounded-lg bg-primary/10">
+          <Icon className="h-5 w-5 text-primary" />
+        </div>
       </div>
       <div className="text-3xl font-bold mb-1" data-testid={`text-kpi-value-${title}`}>
         {value}

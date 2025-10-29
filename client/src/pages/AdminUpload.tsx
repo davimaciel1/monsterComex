@@ -53,12 +53,12 @@ export default function AdminUpload() {
           <div className="flex items-center gap-3">
             <ShieldCheck className="h-8 w-8 text-primary" />
             <h1 className="text-3xl md:text-4xl font-bold" data-testid="text-admin-title">
-              Admin Upload
+              Administração
             </h1>
             <Badge variant="default" data-testid="badge-admin-role">ADMIN</Badge>
           </div>
           <p className="text-muted-foreground" data-testid="text-admin-description">
-            Upload and manage Excel/CSV files for maritime trade data ingestion
+            Envie e gerencie arquivos Excel/CSV para ingestão de dados de comércio marítimo
           </p>
         </div>
 

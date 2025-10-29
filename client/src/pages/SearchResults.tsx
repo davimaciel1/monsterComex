@@ -19,10 +19,10 @@ export default function SearchResults() {
       <div className="max-w-4xl mx-auto px-4 md:px-6 lg:px-8 py-12">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2" data-testid="text-search-results-title">
-            Search Results
+            Resultados da Busca
           </h1>
           <p className="text-muted-foreground" data-testid="text-results-count">
-            Found {mockCompanies.length} companies
+            {mockCompanies.length} empresas encontradas
           </p>
         </div>
 

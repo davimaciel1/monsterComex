@@ -61,13 +61,13 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
         
         <div className="space-y-2">
           <h3 className="text-lg font-semibold">
-            {selectedFile ? selectedFile.name : 'Upload Excel or CSV File'}
+            {selectedFile ? selectedFile.name : 'Enviar Arquivo Excel ou CSV'}
           </h3>
           <p className="text-sm text-muted-foreground">
-            Drag and drop your file here, or click to browse
+            Arraste e solte seu arquivo aqui, ou clique para selecionar
           </p>
           <p className="text-xs text-muted-foreground">
-            Supported formats: .xlsx, .xls, .csv (max 50 MB)
+            Formatos suportados: .xlsx, .xls, .csv (máx 50 MB)
           </p>
         </div>
 
@@ -75,7 +75,7 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
           <Button variant="outline" asChild data-testid="button-browse-file">
             <label className="cursor-pointer">
               <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Browse Files
+              Selecionar Arquivo
               <input
                 type="file"
                 className="hidden"
@@ -92,7 +92,7 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
               }}
               data-testid="button-upload-file"
             >
-              Upload File
+              Enviar Arquivo
             </Button>
           )}
         </div>

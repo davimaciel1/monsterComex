@@ -39,11 +39,11 @@ export function ShipmentsTable({ shipments, onExport }: ShipmentsTableProps) {
   return (
     <Card className="p-6" data-testid="card-shipments-table">
       <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-        <h2 className="text-2xl font-semibold">Shipments</h2>
+        <h2 className="text-2xl font-semibold">Embarques</h2>
         <div className="flex items-center gap-4 flex-wrap">
           <Input
             type="search"
-            placeholder="Search shipments..."
+            placeholder="Buscar embarques..."
             className="w-64"
             value={searchQuery}
             onChange={(e) => {
@@ -61,7 +61,7 @@ export function ShipmentsTable({ shipments, onExport }: ShipmentsTableProps) {
             data-testid="button-export-csv"
           >
             <Download className="h-4 w-4 mr-2" />
-            Export CSV
+            Exportar CSV
           </Button>
         </div>
       </div>
@@ -70,15 +70,15 @@ export function ShipmentsTable({ shipments, onExport }: ShipmentsTableProps) {
         <table className="w-full">
           <thead>
             <tr className="border-b">
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Shipment No</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">ETS</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">ETA</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Partner</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Origin</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Destination</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">HS Code</th>
+              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Nº Embarque</th>
+              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Embarque</th>
+              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Chegada</th>
+              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Parceiro</th>
+              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Origem</th>
+              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Destino</th>
+              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Código HS</th>
               <th className="text-right p-3 text-sm font-medium text-muted-foreground">TEUs</th>
-              <th className="text-right p-3 text-sm font-medium text-muted-foreground">Weight (kg)</th>
+              <th className="text-right p-3 text-sm font-medium text-muted-foreground">Peso (kg)</th>
             </tr>
           </thead>
           <tbody>
@@ -105,7 +105,7 @@ export function ShipmentsTable({ shipments, onExport }: ShipmentsTableProps) {
 
       <div className="flex items-center justify-between mt-6">
         <div className="text-sm text-muted-foreground">
-          Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredShipments.length)} of {filteredShipments.length} shipments
+          Mostrando {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredShipments.length)} de {filteredShipments.length} embarques
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -118,7 +118,7 @@ export function ShipmentsTable({ shipments, onExport }: ShipmentsTableProps) {
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <div className="text-sm">
-            Page {currentPage} of {totalPages}
+            Página {currentPage} de {totalPages}
           </div>
           <Button
             variant="outline"

@@ -32,7 +32,7 @@ export function CompanyCard({ name, kind, countryCode, score, onClick }: Company
                 variant={kind === 'importer' ? 'default' : 'secondary'}
                 data-testid={`badge-company-type-${kind}`}
               >
-                {kind.toUpperCase()}
+                {kind === 'importer' ? 'IMPORTADOR' : 'EXPORTADOR'}
               </Badge>
               <span className="text-sm text-muted-foreground" data-testid={`text-country-${countryCode}`}>
                 {countryCode}
@@ -42,7 +42,7 @@ export function CompanyCard({ name, kind, countryCode, score, onClick }: Company
         </div>
         {score && (
           <div className="text-sm text-muted-foreground" data-testid="text-similarity-score">
-            {Math.round(score * 100)}% match
+            {Math.round(score * 100)}% compatível
           </div>
         )}
       </div>

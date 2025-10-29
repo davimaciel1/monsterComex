@@ -47,25 +47,25 @@ export default function CompanyProfile() {
                 ACME Corporation
               </h1>
               <div className="flex items-center gap-2 flex-wrap">
-                <Badge data-testid="badge-company-type">IMPORTER</Badge>
-                <span className="text-muted-foreground" data-testid="text-company-country">United States</span>
+                <Badge data-testid="badge-company-type">IMPORTADOR</Badge>
+                <span className="text-muted-foreground" data-testid="text-company-country">Estados Unidos</span>
               </div>
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <KPICard title="Shipments" value="2,340" icon={Ship} />
-          <KPICard title="TEUs" value="8,456" icon={Package} />
-          <KPICard title="Weight (kg)" value="1.2M" icon={Weight} />
-          <KPICard title="Partners" value="67" icon={Users} />
+          <KPICard title="Embarques" value="2.340" icon={Ship} />
+          <KPICard title="TEUs" value="8.456" icon={Package} />
+          <KPICard title="Peso (kg)" value="1,2M" icon={Weight} />
+          <KPICard title="Parceiros" value="67" icon={Users} />
         </div>
 
         <ShipmentsChart data={mockChartData} />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <TopRankingCard 
-            title="Top Partners" 
+            title="Principais Parceiros" 
             items={[
               { name: 'ABC Trading Co', count: 245 },
               { name: 'Global Imports Ltd', count: 189 },
@@ -75,21 +75,21 @@ export default function CompanyProfile() {
             ]} 
           />
           <TopRankingCard 
-            title="Top Origin Countries" 
+            title="Principais Países de Origem" 
             items={[
               { name: 'China', count: 456 },
-              { name: 'Vietnam', count: 342 },
-              { name: 'South Korea', count: 298 },
-              { name: 'Japan', count: 234 },
+              { name: 'Vietnã', count: 342 },
+              { name: 'Coreia do Sul', count: 298 },
+              { name: 'Japão', count: 234 },
               { name: 'Taiwan', count: 187 },
             ]} 
           />
           <TopRankingCard 
-            title="Top Destination Ports" 
+            title="Principais Portos de Destino" 
             items={[
               { name: 'Los Angeles', count: 567 },
               { name: 'Long Beach', count: 489 },
-              { name: 'New York', count: 412 },
+              { name: 'Nova York', count: 412 },
               { name: 'Savannah', count: 356 },
               { name: 'Oakland', count: 298 },
             ]} 
@@ -98,13 +98,13 @@ export default function CompanyProfile() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <TopRankingCard 
-            title="Top HS Codes" 
+            title="Principais Códigos HS" 
             items={[
-              { name: '8471.30 - Computers', count: 234 },
-              { name: '8528.72 - Monitors', count: 189 },
-              { name: '8517.62 - Routers', count: 156 },
-              { name: '8443.32 - Printers', count: 134 },
-              { name: '8504.40 - Power supplies', count: 98 },
+              { name: '8471.30 - Computadores', count: 234 },
+              { name: '8528.72 - Monitores', count: 189 },
+              { name: '8517.62 - Roteadores', count: 156 },
+              { name: '8443.32 - Impressoras', count: 134 },
+              { name: '8504.40 - Fontes de alimentação', count: 98 },
             ]} 
           />
         </div>

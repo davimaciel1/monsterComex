@@ -33,7 +33,7 @@ export function Header({ onSearch, compact = false }: HeaderProps) {
               <div className="relative">
                 <Input
                   type="search"
-                  placeholder="Search for any importer or exporter..."
+                  placeholder="Busque por qualquer importador ou exportador..."
                   className="pr-10 h-10"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -54,7 +54,7 @@ export function Header({ onSearch, compact = false }: HeaderProps) {
 
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" data-testid="button-login">
-              Log In
+              Entrar
             </Button>
           </div>
         </div>
