@@ -3,46 +3,53 @@ import { UploadZone } from "@/components/UploadZone";
 import { IngestionHistoryTable } from "@/components/IngestionHistoryTable";
 import { Badge } from "@/components/ui/badge";
 import { ShieldCheck } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 export default function AdminUpload() {
-  const mockIngestions = [
-    {
-      id: 1,
-      filename: 'shipments_2024_Q1.xlsx',
-      uploadDate: '2024-01-15 14:30',
-      status: 'done' as const,
-      rowsTotal: 15000,
-      rowsOk: 14950,
-      rowsFailed: 50,
+  const { toast } = useToast();
+
+  const { data: ingestionsData, isLoading } = useQuery({
+    queryKey: ['/api/ingestions'],
+    refetchInterval: 3000, // Poll every 3 seconds for status updates
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Upload falhou');
+      }
+      
+      return response.json();
     },
-    {
-      id: 2,
-      filename: 'export_data.csv',
-      uploadDate: '2024-01-14 09:15',
-      status: 'processing' as const,
-      rowsTotal: 8000,
-      rowsOk: 6500,
-      rowsFailed: 0,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/ingestions'] });
+      toast({
+        title: "Arquivo enviado",
+        description: `Ingestão #${data.id} criada e processando em segundo plano`,
+      });
     },
-    {
-      id: 3,
-      filename: 'import_records.xlsx',
-      uploadDate: '2024-01-13 16:45',
-      status: 'failed' as const,
-      rowsTotal: 5000,
-      rowsOk: 2300,
-      rowsFailed: 2700,
+    onError: (error: Error) => {
+      toast({
+        title: "Erro no upload",
+        description: error.message,
+        variant: "destructive",
+      });
     },
-    {
-      id: 4,
-      filename: 'trade_data_Q4.csv',
-      uploadDate: '2024-01-12 11:20',
-      status: 'done' as const,
-      rowsTotal: 12000,
-      rowsOk: 12000,
-      rowsFailed: 0,
-    },
-  ];
+  });
+
+  const ingestions = ingestionsData?.ingestions || [];
 
   return (
     <div className="min-h-screen bg-background">
@@ -62,14 +69,20 @@ export default function AdminUpload() {
           </p>
         </div>
 
-        <UploadZone onFileSelect={(file) => console.log('File selected:', file)} />
+        <UploadZone onFileSelect={(file) => uploadMutation.mutate(file)} />
 
-        <IngestionHistoryTable 
-          ingestions={mockIngestions}
-          onViewErrors={(id) => console.log('View errors:', id)}
-          onReprocess={(id) => console.log('Reprocess:', id)}
-          onCancel={(id) => console.log('Cancel:', id)}
-        />
+        {isLoading ? (
+          <div className="text-center py-12 text-muted-foreground">
+            Carregando histórico...
+          </div>
+        ) : (
+          <IngestionHistoryTable 
+            ingestions={ingestions}
+            onViewErrors={(id) => console.log('View errors:', id)}
+            onReprocess={(id) => console.log('Reprocess:', id)}
+            onCancel={(id) => console.log('Cancel:', id)}
+          />
+        )}
       </div>
     </div>
   );
