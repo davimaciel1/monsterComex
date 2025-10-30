@@ -29,6 +29,10 @@ const HEADER_MAPPINGS: Record<string, CanonicalShipmentField> = {
   nomedaempresa: "company_name",
   razaosocial: "company_name",
   empresanome: "company_name",
+  nomeexportador: "company_name",
+  exportador: "company_name",
+  consignatario: "partner_name",
+  importador: "partner_name",
   companykind: "company_kind",
   tipodeempresa: "company_kind",
   tipoempresa: "company_kind",
@@ -36,9 +40,11 @@ const HEADER_MAPPINGS: Record<string, CanonicalShipmentField> = {
   companycountry: "company_country",
   paisdaempresa: "company_country",
   paisempresa: "company_country",
+  paisdeprocedencia: "company_country",
   shipmentno: "shipment_no",
   numerodoembarque: "shipment_no",
   conhecimento: "shipment_no",
+  embarque: "shipment_no",
   ets: "ets",
   dataets: "ets",
   eta: "eta",
@@ -50,21 +56,26 @@ const HEADER_MAPPINGS: Record<string, CanonicalShipmentField> = {
   paisparceiro: "partner_country",
   origincountry: "origin_country",
   paisorigem: "origin_country",
+  paisdeembarque: "origin_country",
   originport: "origin_port",
   portoorigem: "origin_port",
+  portoembarque: "origin_port",
   destinationcountry: "destination_country",
   paisdestino: "destination_country",
   destinationport: "destination_port",
   portodestino: "destination_port",
+  portodescarga: "destination_port",
   hscode: "hs_code",
   ncm: "hs_code",
   hsdescription: "hs_description",
   descricaoncm: "hs_description",
+  mercadoria: "hs_description",
   teus: "teus",
   teu: "teus",
   weightkg: "weight_kg",
   pesokg: "weight_kg",
   peso: "weight_kg",
+  pesobruto: "weight_kg",
 };
 
 const COMPANY_KIND_MAPPINGS: Record<string, "importer" | "exporter"> = {
@@ -107,6 +118,11 @@ function normalizeShipmentRow(row: ShipmentRow): ShipmentRow {
       typeof value === "string" ? value.trim() : value;
   }
 
+  // Infer company_kind if not present: if we have company_name, assume exporter
+  if (!normalizedRow.company_kind && normalizedRow.company_name) {
+    normalizedRow.company_kind = "exporter";
+  }
+  
   if (normalizedRow.company_kind) {
     normalizedRow.company_kind = normalizeCompanyKind(
       normalizedRow.company_kind
