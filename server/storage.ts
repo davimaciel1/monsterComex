@@ -2,7 +2,10 @@ import type {
   Company, InsertCompany,
   Shipment, InsertShipment,
   Ingestion, InsertIngestion,
-  ErrorLog, InsertErrorLog
+  ErrorLog, InsertErrorLog,
+  User, InsertUser,
+  UserPlan, InsertUserPlan,
+  UserEntitlement
 } from "@shared/schema";
 import { db } from "./db";
 
@@ -45,6 +48,27 @@ export interface IStorage {
   createErrorLog(errorLog: InsertErrorLog): Promise<ErrorLog>;
   createErrorLogsBatch(errorLogs: InsertErrorLog[], tx?: any): Promise<void>;
   getErrorLogsByIngestionId(ingestionId: number): Promise<ErrorLog[]>;
+
+  // User operations
+  createUser(user: InsertUser): Promise<User>;
+  getUserByEmail(email: string): Promise<User | null>;
+  getUserById(id: number): Promise<User | null>;
+
+  // Plan operations
+  setActivePlan(userId: number, plan: Omit<InsertUserPlan, "userId" | "status" | "monthlyPrice" | "annualPrice"> & { billingCycle: string; monthlyPrice: number; annualPrice: number }): Promise<UserPlan>;
+  getActivePlanByUserId(userId: number): Promise<UserPlan | null>;
+
+  // Entitlement operations
+  listEntitlementsByUser(userId: number): Promise<UserEntitlement[]>;
+  getCompanyEntitlement(userId: number, companyId: number): Promise<UserEntitlement | null>;
+  grantCompanyEntitlement(userId: number, companyId: number, kind: 'importer' | 'exporter', label: string): Promise<UserEntitlement>;
+  getNcmEntitlement(userId: number, ncmCode: string): Promise<UserEntitlement | null>;
+  grantNcmEntitlement(userId: number, ncmCode: string, label: string): Promise<UserEntitlement>;
+  countEntitlementsByKind(userId: number): Promise<Record<'importer' | 'exporter' | 'ncm', number>>;
+
+  // NCM operations
+  searchNcm(query: string, limit?: number): Promise<Array<{ code: string; description: string | null; totalShipments: number }>>;
+  getNcmSummary(code: string): Promise<{ code: string; description: string | null; totalShipments: number; totalWeightKg: number; totalTeus: number } | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -584,12 +608,300 @@ export class DatabaseStorage implements IStorage {
   async getErrorLogsByIngestionId(ingestionId: number): Promise<ErrorLog[]> {
     const { errorLogs } = await import("@shared/schema");
     const { eq } = await import("drizzle-orm");
-    
+
     return await this.db
       .select()
       .from(errorLogs)
       .where(eq(errorLogs.ingestionId, ingestionId))
       .orderBy(errorLogs.rowNumber);
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const sanitizedName = user.name.trim();
+    const sanitizedEmail = user.email.trim().toLowerCase();
+    const passwordHash = user.passwordHash.trim();
+
+    const { users } = await import("@shared/schema");
+
+    const result = await this.db
+      .insert(users)
+      .values({
+        name: sanitizedName,
+        email: sanitizedEmail,
+        passwordHash,
+      })
+      .returning();
+
+    return result[0];
+  }
+
+  async getUserByEmail(email: string): Promise<User | null> {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) return null;
+
+    const { users } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const result = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.email, trimmed))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async getUserById(id: number): Promise<User | null> {
+    const { users } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const result = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async setActivePlan(
+    userId: number,
+    plan: Omit<InsertUserPlan, "userId" | "status" | "monthlyPrice" | "annualPrice"> & { billingCycle: string; monthlyPrice: number; annualPrice: number }
+  ): Promise<UserPlan> {
+    const { userPlans } = await import("@shared/schema");
+    const { eq, and } = await import("drizzle-orm");
+
+    const sanitizedPlan = {
+      importerQuota: Math.max(0, plan.importerQuota ?? 0),
+      exporterQuota: Math.max(0, plan.exporterQuota ?? 0),
+      ncmQuota: Math.max(0, plan.ncmQuota ?? 0),
+      billingCycle: plan.billingCycle,
+      monthlyPrice: plan.monthlyPrice.toFixed(2),
+      annualPrice: plan.annualPrice.toFixed(2),
+    };
+
+    return await this.db.transaction(async (tx: any) => {
+      await tx
+        .update(userPlans)
+        .set({ status: "archived", updatedAt: new Date() })
+        .where(and(eq(userPlans.userId, userId), eq(userPlans.status, "active")));
+
+      const result = await tx
+        .insert(userPlans)
+        .values({
+          userId,
+          status: "active",
+          ...sanitizedPlan,
+        })
+        .returning();
+
+      return result[0];
+    });
+  }
+
+  async getActivePlanByUserId(userId: number): Promise<UserPlan | null> {
+    const { userPlans } = await import("@shared/schema");
+    const { eq, desc } = await import("drizzle-orm");
+
+    const result: UserPlan[] = await this.db
+      .select()
+      .from(userPlans)
+      .where(eq(userPlans.userId, userId))
+      .orderBy(desc(userPlans.createdAt));
+
+    return result.find((planEntry) => planEntry.status === "active") || null;
+  }
+
+  async listEntitlementsByUser(userId: number): Promise<UserEntitlement[]> {
+    const { userEntitlements } = await import("@shared/schema");
+    const { eq, asc } = await import("drizzle-orm");
+
+    return await this.db
+      .select()
+      .from(userEntitlements)
+      .where(eq(userEntitlements.userId, userId))
+      .orderBy(asc(userEntitlements.createdAt));
+  }
+
+  async getCompanyEntitlement(userId: number, companyId: number): Promise<UserEntitlement | null> {
+    const { userEntitlements } = await import("@shared/schema");
+    const { eq, and } = await import("drizzle-orm");
+
+    if (!companyId) return null;
+
+    const result = await this.db
+      .select()
+      .from(userEntitlements)
+      .where(and(
+        eq(userEntitlements.userId, userId),
+        eq(userEntitlements.companyId, companyId)
+      ))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async grantCompanyEntitlement(
+    userId: number,
+    companyId: number,
+    kind: 'importer' | 'exporter',
+    label: string
+  ): Promise<UserEntitlement> {
+    const existing = await this.getCompanyEntitlement(userId, companyId);
+    if (existing) {
+      return existing;
+    }
+
+    const { userEntitlements } = await import("@shared/schema");
+
+    const result = await this.db
+      .insert(userEntitlements)
+      .values({
+        userId,
+        companyId,
+        targetKind: kind,
+        label,
+      })
+      .returning();
+
+    return result[0];
+  }
+
+  async getNcmEntitlement(userId: number, ncmCode: string): Promise<UserEntitlement | null> {
+    const trimmed = (ncmCode || "").trim();
+    if (!trimmed) return null;
+
+    const { userEntitlements } = await import("@shared/schema");
+    const { eq, and } = await import("drizzle-orm");
+
+    const result = await this.db
+      .select()
+      .from(userEntitlements)
+      .where(and(
+        eq(userEntitlements.userId, userId),
+        eq(userEntitlements.ncmCode, trimmed)
+      ))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async grantNcmEntitlement(userId: number, ncmCode: string, label: string): Promise<UserEntitlement> {
+    const trimmedCode = (ncmCode || "").trim();
+    if (!trimmedCode) {
+      throw new Error("Código NCM inválido");
+    }
+
+    const existing = await this.getNcmEntitlement(userId, trimmedCode);
+    if (existing) {
+      return existing;
+    }
+
+    const { userEntitlements } = await import("@shared/schema");
+
+    const result = await this.db
+      .insert(userEntitlements)
+      .values({
+        userId,
+        targetKind: 'ncm',
+        ncmCode: trimmedCode,
+        label,
+      })
+      .returning();
+
+    return result[0];
+  }
+
+  async countEntitlementsByKind(userId: number): Promise<Record<'importer' | 'exporter' | 'ncm', number>> {
+    const { userEntitlements } = await import("@shared/schema");
+    const { eq, sql } = await import("drizzle-orm");
+
+    const rows = await this.db
+      .select({
+        targetKind: userEntitlements.targetKind,
+        total: sql<number>`count(*)::int`,
+      })
+      .from(userEntitlements)
+      .where(eq(userEntitlements.userId, userId))
+      .groupBy(userEntitlements.targetKind);
+
+    const counts: Record<'importer' | 'exporter' | 'ncm', number> = {
+      importer: 0,
+      exporter: 0,
+      ncm: 0,
+    };
+
+    for (const row of rows) {
+      const kind = row.targetKind as 'importer' | 'exporter' | 'ncm';
+      if (counts[kind] !== undefined) {
+        counts[kind] = Number(row.total) || 0;
+      }
+    }
+
+    return counts;
+  }
+
+  async searchNcm(query: string, limit = 10): Promise<Array<{ code: string; description: string | null; totalShipments: number }>> {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
+      return [];
+    }
+
+    const { sql } = await import("drizzle-orm");
+
+    const results = await this.db.execute(sql`
+      select
+        hs_code as code,
+        max(nullif(hs_description, '')) as description,
+        count(*) as total_shipments
+      from shipments
+      where hs_code is not null
+        and (hs_code ilike ${'%' + trimmedQuery + '%'} or hs_description ilike ${'%' + trimmedQuery + '%'})
+      group by hs_code
+      order by total_shipments desc
+      limit ${limit}
+    `);
+
+    return results.rows.map((row: any) => ({
+      code: row.code,
+      description: row.description ?? null,
+      totalShipments: typeof row.total_shipments === "number" ? row.total_shipments : Number(row.total_shipments || 0),
+    }));
+  }
+
+  async getNcmSummary(code: string): Promise<{ code: string; description: string | null; totalShipments: number; totalWeightKg: number; totalTeus: number } | null> {
+    const trimmedCode = code.trim();
+    if (!trimmedCode) {
+      return null;
+    }
+
+    const { shipments } = await import("@shared/schema");
+    const { eq, sql } = await import("drizzle-orm");
+
+    const rows = await this.db
+      .select({
+        code: shipments.hsCode,
+        description: sql<string | null>`max(nullif(${shipments.hsDescription}, ''))`,
+        totalShipments: sql<number>`count(*)::int`,
+        totalWeightKg: sql<string>`sum(CAST(${shipments.weightKg} AS DECIMAL))`,
+        totalTeus: sql<number>`sum(coalesce(${shipments.teus},0))::int`,
+      })
+      .from(shipments)
+      .where(eq(shipments.hsCode, trimmedCode))
+      .groupBy(shipments.hsCode);
+
+    if (!rows.length) {
+      return null;
+    }
+
+    const row = rows[0];
+    return {
+      code: row.code,
+      description: row.description,
+      totalShipments: row.totalShipments || 0,
+      totalWeightKg: parseFloat(row.totalWeightKg || '0'),
+      totalTeus: row.totalTeus || 0,
+    };
   }
 }
 
