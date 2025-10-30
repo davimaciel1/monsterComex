@@ -1,0 +1,593 @@
+diff --git a/server/routes.ts b/server/routes.ts
+index 8b0f9b33e27b2861aa4d140bfb0d705a9ebf0a2d..1b424a100823b58e0b566def06a12e268d4a8849 100644
+--- a/server/routes.ts
++++ b/server/routes.ts
+@@ -1,35 +1,41 @@
+ import type { Express, Request, Response } from "express";
+ import type { User, Company, UserPlan, UserEntitlement } from "@shared/schema";
+ import type { SessionResponse } from "@shared/auth";
+ import { createServer, type Server } from "http";
+ import { storage } from "./storage";
+ import { z } from "zod";
+ import { upload } from "./upload";
+ import { enqueueJob } from "./etl";
+ import { hashPassword, verifyPassword } from "./auth";
+ import { calculatePlanQuote } from "@shared/pricing";
++import {
++  getSampleCompanyById,
++  getSampleNcmByCode,
++  searchSampleCompanies,
++  searchSampleNcms,
++} from "@shared/sample-data";
+ 
+ declare module "express-session" {
+   interface SessionData {
+     userId?: number;
+   }
+ }
+ 
+ type UsageCounts = Record<'importer' | 'exporter' | 'ncm', number>;
+ 
+ interface EntitlementContext {
+   plan: UserPlan | null;
+   entitlements: UserEntitlement[];
+   usage: UsageCounts;
+ }
+ 
+ const AUTH_REQUIRED_MESSAGE = "Faça login para acessar essa funcionalidade.";
+ const PLAN_REQUIRED_MESSAGE = "Você ainda não contratou um plano para esse tipo de consulta. Acesse a página de planos para continuar.";
+ const PLAN_LIMIT_MESSAGE = "Você atingiu o limite de consultas do seu plano para esse tipo. Amplie sua franquia para seguir consultando.";
+ 
+ function normalizeKind(kind: string | null | undefined): 'importer' | 'exporter' | 'ncm' | null {
+   if (!kind) return null;
+   const value = kind.toLowerCase();
+   if (value === 'importer' || value === 'exporter' || value === 'ncm') {
+     return value;
+   }
+@@ -381,58 +387,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
+         exporterSlots: payload.exporterQuota,
+         ncmSlots: payload.ncmQuota,
+       });
+ 
+       await storage.setActivePlan(auth.user.id, {
+         importerQuota: payload.importerQuota,
+         exporterQuota: payload.exporterQuota,
+         ncmQuota: payload.ncmQuota,
+         billingCycle: payload.billingCycle,
+         monthlyPrice: quote.monthlyTotal,
+         annualPrice: quote.annualTotal,
+       });
+ 
+       const session = await buildSessionResponse(auth.user.id);
+       res.status(201).json(session);
+     } catch (error: any) {
+       if (error instanceof z.ZodError) {
+         return res.status(400).json({ message: "Seleção de plano inválida." });
+       }
+ 
+       res.status(500).json({ message: error.message || "Não foi possível contratar o plano." });
+     }
+   });
+ 
+   app.get("/api/companies/search", async (req, res) => {
+-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+-    if (!auth || !auth.context) return;
+-    const context = auth.context;
+-
+     try {
+       const query = String(req.query.q || "");
+       const limit = parseInt(String(req.query.limit || "10"), 10);
+ 
++      if (!req.session?.userId) {
++        const sampleResults = searchSampleCompanies(query, Number.isNaN(limit) ? 10 : limit).map((company) => ({
++          company: {
++            id: company.id,
++            name: company.name,
++            kind: company.kind,
++            countryCode: company.countryCode,
++          },
++          score: company.score,
++          allowed: true,
++          reason: undefined,
++          remainingSlots: 0,
++        }));
++
++        return res.json({
++          results: sampleResults,
++          summary: {
++            plan: null,
++            usage: { importer: 0, exporter: 0, ncm: 0 },
++            remaining: { importer: 0, exporter: 0 },
++          },
++          mode: "guest",
++        });
++      }
++
++      const auth = await ensureAuthenticated(req, res, { loadContext: true });
++      if (!auth || !auth.context) return;
++      const context = auth.context;
++
+       if (!query.trim()) {
+         return res.json({
+           results: [],
+           summary: {
+             plan: summarizePlan(context.plan),
+             usage: context.usage,
+             remaining: {
+               importer: Math.max(quotaForKind(context.plan, 'importer') - context.usage.importer, 0),
+               exporter: Math.max(quotaForKind(context.plan, 'exporter') - context.usage.exporter, 0),
+             },
+           },
+         });
+       }
+ 
+       const results = await storage.searchCompanies(query, Number.isNaN(limit) ? 10 : limit);
+       const entitlementCompanyIds = new Set(
+         context.entitlements
+           .filter((entry) => entry.companyId != null)
+           .map((entry) => entry.companyId as number),
+       );
+ 
+       const mapped = results.map(({ company, score }) => {
+         const kind: 'importer' | 'exporter' = company.kind === 'importer' ? 'importer' : 'exporter';
+         const hasEntitlement = entitlementCompanyIds.has(company.id);
+         const quota = quotaForKind(context.plan, kind);
+@@ -443,244 +474,356 @@ export async function registerRoutes(app: Express): Promise<Server> {
+           company,
+           score,
+           allowed,
+           reason: allowed ? undefined : (context.plan ? PLAN_LIMIT_MESSAGE : PLAN_REQUIRED_MESSAGE),
+           remainingSlots: remaining,
+         };
+       });
+ 
+       res.json({
+         results: mapped,
+         summary: {
+           plan: summarizePlan(context.plan),
+           usage: context.usage,
+           remaining: {
+             importer: Math.max(quotaForKind(context.plan, 'importer') - context.usage.importer, 0),
+             exporter: Math.max(quotaForKind(context.plan, 'exporter') - context.usage.exporter, 0),
+           },
+         },
+       });
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Erro ao buscar empresas." });
+     }
+   });
+ 
+   app.get("/api/companies/:id", async (req, res) => {
+-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+-    if (!auth || !auth.context) return;
+-
+     const companyId = Number.parseInt(req.params.id, 10);
+     if (Number.isNaN(companyId)) {
+       return res.status(400).json({ message: "Identificador inválido." });
+     }
+ 
++    if (!req.session?.userId) {
++      const sample = getSampleCompanyById(companyId);
++      if (!sample) {
++        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
++      }
++
++      return res.json({
++        id: sample.id,
++        name: sample.name,
++        kind: sample.kind,
++        countryCode: sample.countryCode,
++      });
++    }
++
++    const auth = await ensureAuthenticated(req, res, { loadContext: true });
++    if (!auth || !auth.context) return;
++
+     try {
+       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
+       if (access.error || !access.company) {
+         return res.status(access.error?.status ?? 500).json({ message: access.error?.message || "Falha ao consultar a empresa." });
+       }
+ 
+       res.json(access.company);
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Não foi possível carregar a empresa." });
+     }
+   });
+ 
+   app.get("/api/companies/:id/stats", async (req, res) => {
+-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+-    if (!auth || !auth.context) return;
+-
+     const companyId = Number.parseInt(req.params.id, 10);
+     if (Number.isNaN(companyId)) {
+       return res.status(400).json({ message: "Identificador inválido." });
+     }
+ 
++    if (!req.session?.userId) {
++      const sample = getSampleCompanyById(companyId);
++      if (!sample) {
++        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
++      }
++
++      return res.json(sample.metrics);
++    }
++
++    const auth = await ensureAuthenticated(req, res, { loadContext: true });
++    if (!auth || !auth.context) return;
++
+     try {
+       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
+       if (access.error) {
+         return res.status(access.error.status).json({ message: access.error.message });
+       }
+ 
+       const stats = await storage.getCompanyStats(companyId);
+       res.json(stats);
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Não foi possível carregar os indicadores." });
+     }
+   });
+ 
+   app.get("/api/companies/:id/shipments-over-time", async (req, res) => {
+-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+-    if (!auth || !auth.context) return;
+-
+     const companyId = Number.parseInt(req.params.id, 10);
+     if (Number.isNaN(companyId)) {
+       return res.status(400).json({ message: "Identificador inválido." });
+     }
+ 
++    if (!req.session?.userId) {
++      const sample = getSampleCompanyById(companyId);
++      if (!sample) {
++        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
++      }
++
++      return res.json(sample.shipmentsOverTime);
++    }
++
++    const auth = await ensureAuthenticated(req, res, { loadContext: true });
++    if (!auth || !auth.context) return;
++
+     try {
+       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
+       if (access.error) {
+         return res.status(access.error.status).json({ message: access.error.message });
+       }
+ 
+       const data = await storage.getCompanyShipmentsOverTime(companyId);
+       res.json(data);
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Não foi possível carregar o histórico." });
+     }
+   });
+ 
+   app.get("/api/companies/:id/top-partners", async (req, res) => {
+-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+-    if (!auth || !auth.context) return;
+-
+     const companyId = Number.parseInt(req.params.id, 10);
+     if (Number.isNaN(companyId)) {
+       return res.status(400).json({ message: "Identificador inválido." });
+     }
+ 
++    const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
++
++    if (!req.session?.userId) {
++      const sample = getSampleCompanyById(companyId);
++      if (!sample) {
++        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
++      }
++
++      return res.json(sample.topPartners.slice(0, Number.isNaN(limit) ? 5 : limit));
++    }
++
++    const auth = await ensureAuthenticated(req, res, { loadContext: true });
++    if (!auth || !auth.context) return;
++
+     try {
+       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
+       if (access.error) {
+         return res.status(access.error.status).json({ message: access.error.message });
+       }
+ 
+-      const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
+       const data = await storage.getTopPartners(companyId, Number.isNaN(limit) ? 5 : limit);
+       res.json(data);
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Não foi possível carregar os parceiros." });
+     }
+   });
+ 
+   app.get("/api/companies/:id/top-origin-countries", async (req, res) => {
+-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+-    if (!auth || !auth.context) return;
+-
+     const companyId = Number.parseInt(req.params.id, 10);
+     if (Number.isNaN(companyId)) {
+       return res.status(400).json({ message: "Identificador inválido." });
+     }
+ 
++    const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
++
++    if (!req.session?.userId) {
++      const sample = getSampleCompanyById(companyId);
++      if (!sample) {
++        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
++      }
++
++      return res.json(sample.topOriginCountries.slice(0, Number.isNaN(limit) ? 5 : limit));
++    }
++
++    const auth = await ensureAuthenticated(req, res, { loadContext: true });
++    if (!auth || !auth.context) return;
++
+     try {
+       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
+       if (access.error) {
+         return res.status(access.error.status).json({ message: access.error.message });
+       }
+ 
+-      const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
+       const data = await storage.getTopOriginCountries(companyId, Number.isNaN(limit) ? 5 : limit);
+       res.json(data);
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Não foi possível carregar os países de origem." });
+     }
+   });
+ 
+   app.get("/api/companies/:id/top-destination-ports", async (req, res) => {
+-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+-    if (!auth || !auth.context) return;
+-
+     const companyId = Number.parseInt(req.params.id, 10);
+     if (Number.isNaN(companyId)) {
+       return res.status(400).json({ message: "Identificador inválido." });
+     }
+ 
++    const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
++
++    if (!req.session?.userId) {
++      const sample = getSampleCompanyById(companyId);
++      if (!sample) {
++        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
++      }
++
++      return res.json(sample.topDestinationPorts.slice(0, Number.isNaN(limit) ? 5 : limit));
++    }
++
++    const auth = await ensureAuthenticated(req, res, { loadContext: true });
++    if (!auth || !auth.context) return;
++
+     try {
+       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
+       if (access.error) {
+         return res.status(access.error.status).json({ message: access.error.message });
+       }
+ 
+-      const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
+       const data = await storage.getTopDestinationPorts(companyId, Number.isNaN(limit) ? 5 : limit);
+       res.json(data);
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Não foi possível carregar os portos." });
+     }
+   });
+ 
+   app.get("/api/companies/:id/top-hs-codes", async (req, res) => {
+-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+-    if (!auth || !auth.context) return;
+-
+     const companyId = Number.parseInt(req.params.id, 10);
+     if (Number.isNaN(companyId)) {
+       return res.status(400).json({ message: "Identificador inválido." });
+     }
+ 
++    const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
++
++    if (!req.session?.userId) {
++      const sample = getSampleCompanyById(companyId);
++      if (!sample) {
++        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
++      }
++
++      return res.json(sample.topHSCodes.slice(0, Number.isNaN(limit) ? 5 : limit));
++    }
++
++    const auth = await ensureAuthenticated(req, res, { loadContext: true });
++    if (!auth || !auth.context) return;
++
+     try {
+       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
+       if (access.error) {
+         return res.status(access.error.status).json({ message: access.error.message });
+       }
+ 
+-      const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
+       const data = await storage.getTopHSCodes(companyId, Number.isNaN(limit) ? 5 : limit);
+       res.json(data);
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Não foi possível carregar os códigos HS." });
+     }
+   });
+ 
+   app.get("/api/companies/:id/shipments", async (req, res) => {
+-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+-    if (!auth || !auth.context) return;
+-
+     const companyId = Number.parseInt(req.params.id, 10);
+     if (Number.isNaN(companyId)) {
+       return res.status(400).json({ message: "Identificador inválido." });
+     }
+ 
++    const limit = Number.parseInt(String(req.query.limit ?? "10"), 10);
++    const offset = Number.parseInt(String(req.query.offset ?? "0"), 10);
++
++    if (!req.session?.userId) {
++      const sample = getSampleCompanyById(companyId);
++      if (!sample) {
++        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
++      }
++
++      const start = Number.isNaN(offset) ? 0 : offset;
++      const end = start + (Number.isNaN(limit) ? 10 : limit);
++      const shipments = sample.shipments.slice(start, end);
++
++      return res.json({
++        shipments: shipments.map((shipment) => ({
++          ...shipment,
++          partner: shipment.partner
++            ? { id: shipment.partner.id, name: shipment.partner.name }
++            : null,
++        })),
++        total: sample.shipments.length,
++      });
++    }
++
++    const auth = await ensureAuthenticated(req, res, { loadContext: true });
++    if (!auth || !auth.context) return;
++
+     try {
+       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
+       if (access.error) {
+         return res.status(access.error.status).json({ message: access.error.message });
+       }
+ 
+-      const limit = Number.parseInt(String(req.query.limit ?? "10"), 10);
+-      const offset = Number.parseInt(String(req.query.offset ?? "0"), 10);
+-
+       const result = await storage.getShipmentsByCompanyId(
+         companyId,
+         Number.isNaN(limit) ? 10 : limit,
+         Number.isNaN(offset) ? 0 : offset,
+       );
+       res.json(result);
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Não foi possível carregar os embarques." });
+     }
+   });
+ 
+   app.get("/api/ncm/search", async (req, res) => {
+-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+-    if (!auth || !auth.context) return;
+-    const context = auth.context;
+-
+     try {
+       const query = String(req.query.q || "").trim();
+       const limit = Number.parseInt(String(req.query.limit ?? "10"), 10);
+ 
++      if (!req.session?.userId) {
++        const sampleResults = searchSampleNcms(query, Number.isNaN(limit) ? 10 : limit).map((item) => ({
++          ...item,
++          allowed: true,
++          reason: undefined,
++          remainingSlots: 0,
++        }));
++
++        return res.json({
++          results: sampleResults,
++          summary: {
++            plan: null,
++            usage: { importer: 0, exporter: 0, ncm: 0 },
++            remaining: { ncm: 0 },
++          },
++          mode: "guest",
++        });
++      }
++
++      const auth = await ensureAuthenticated(req, res, { loadContext: true });
++      if (!auth || !auth.context) return;
++      const context = auth.context;
++
+       if (!query) {
+         return res.json({
+           results: [],
+           summary: {
+             plan: summarizePlan(context.plan),
+             usage: context.usage,
+             remaining: {
+               ncm: Math.max(quotaForKind(context.plan, 'ncm') - context.usage.ncm, 0),
+             },
+           },
+         });
+       }
+ 
+       const results = await storage.searchNcm(query, Number.isNaN(limit) ? 10 : limit);
+       const entitlementCodes = new Set(
+         context.entitlements
+           .filter((entry) => entry.ncmCode)
+           .map((entry) => entry.ncmCode as string),
+       );
+       const quota = quotaForKind(context.plan, 'ncm');
+       const remaining = Math.max(quota - context.usage.ncm, 0);
+ 
+       const mapped = results.map((item) => {
+         const normalizedCode = (item.code || "").trim();
+         const hasEntitlement = entitlementCodes.has(normalizedCode);
+@@ -688,55 +831,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
+ 
+         return {
+           ...item,
+           allowed,
+           reason: allowed ? undefined : (context.plan ? PLAN_LIMIT_MESSAGE : PLAN_REQUIRED_MESSAGE),
+           remainingSlots: remaining,
+         };
+       });
+ 
+       res.json({
+         results: mapped,
+         summary: {
+           plan: summarizePlan(context.plan),
+           usage: context.usage,
+           remaining: {
+             ncm: remaining,
+           },
+         },
+       });
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Erro ao buscar NCMs." });
+     }
+   });
+ 
+   app.get("/api/ncm/:code", async (req, res) => {
++    const code = String(req.params.code || "");
++
++    if (!req.session?.userId) {
++      const sample = getSampleNcmByCode(code);
++      if (!sample) {
++        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
++      }
++
++      return res.json(sample);
++    }
++
+     const auth = await ensureAuthenticated(req, res, { loadContext: true });
+     if (!auth || !auth.context) return;
+ 
+     try {
+-      const code = String(req.params.code || "");
+       const summary = await storage.getNcmSummary(code);
+ 
+       if (!summary) {
+         return res.status(404).json({ message: "Não encontramos esse NCM em nossa base." });
+       }
+ 
+       const access = await ensureNcmAccess(auth.user.id, summary.code, summary.description, auth.context);
+       if (access.error) {
+         return res.status(access.error.status).json({ message: access.error.message });
+       }
+ 
+       res.json(summary);
+     } catch (error: any) {
+       res.status(500).json({ message: error.message || "Não foi possível carregar o NCM." });
+     }
+   });
+ 
+   app.get("/api/ingestions", async (req, res) => {
+     const auth = await ensureAuthenticated(req, res);
+     if (!auth) return;
+ 
+     try {
+       const limit = Number.parseInt(String(req.query.limit ?? "20"), 10);
+       const offset = Number.parseInt(String(req.query.offset ?? "0"), 10);
+ 

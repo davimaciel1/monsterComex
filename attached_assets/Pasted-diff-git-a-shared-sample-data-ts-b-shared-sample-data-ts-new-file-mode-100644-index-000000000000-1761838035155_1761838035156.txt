@@ -1,0 +1,365 @@
+diff --git a/shared/sample-data.ts b/shared/sample-data.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..03a8eeb6dd62bb8136d615a6291c03a0b8fa21a4
+--- /dev/null
++++ b/shared/sample-data.ts
+@@ -0,0 +1,359 @@
++export interface SampleCompanyMetrics {
++  totalShipments: number;
++  totalTEUs: number;
++  totalWeightKg: number;
++  uniquePartners: number;
++}
++
++export interface SampleShipment {
++  id: number;
++  shipmentNo: string;
++  ets: string;
++  eta: string;
++  partner: { id: number; name: string } | null;
++  originCountry: string;
++  originPort?: string;
++  destinationCountry: string;
++  destinationPort?: string;
++  hsCode: string;
++  hsDescription: string;
++  teus: number;
++  weightKg: number;
++}
++
++export interface SampleCompanyData {
++  id: number;
++  name: string;
++  kind: "importer" | "exporter";
++  countryCode: string;
++  score: number;
++  metrics: SampleCompanyMetrics;
++  shipmentsOverTime: Array<{ month: string; shipments: number }>;
++  topPartners: Array<{ name: string; count: number }>;
++  topOriginCountries: Array<{ name: string; count: number }>;
++  topDestinationPorts: Array<{ name: string; count: number }>;
++  topHSCodes: Array<{ name: string; count: number }>;
++  shipments: SampleShipment[];
++}
++
++export const SAMPLE_COMPANIES: SampleCompanyData[] = [
++  {
++    id: -101,
++    name: "Atlas Importadora LTDA",
++    kind: "importer",
++    countryCode: "BR",
++    score: 0.92,
++    metrics: {
++      totalShipments: 186,
++      totalTEUs: 512,
++      totalWeightKg: 428000,
++      uniquePartners: 14,
++    },
++    shipmentsOverTime: [
++      { month: "2023-01", shipments: 8 },
++      { month: "2023-04", shipments: 12 },
++      { month: "2023-07", shipments: 15 },
++      { month: "2023-10", shipments: 18 },
++      { month: "2024-01", shipments: 21 },
++      { month: "2024-04", shipments: 24 },
++      { month: "2024-07", shipments: 28 },
++      { month: "2024-10", shipments: 30 },
++    ],
++    topPartners: [
++      { name: "Pacific Traders PTE", count: 42 },
++      { name: "Shenzhen Maritime", count: 35 },
++      { name: "Hamburg Forwarding", count: 27 },
++      { name: "Mercurio Logistics", count: 22 },
++      { name: "Antwerp Consolidators", count: 18 },
++    ],
++    topOriginCountries: [
++      { name: "China", count: 72 },
++      { name: "Estados Unidos", count: 28 },
++      { name: "Alemanha", count: 24 },
++      { name: "Índia", count: 18 },
++      { name: "Espanha", count: 14 },
++    ],
++    topDestinationPorts: [
++      { name: "Santos", count: 96 },
++      { name: "Paranaguá", count: 28 },
++      { name: "Itajaí", count: 22 },
++      { name: "Rio de Janeiro", count: 18 },
++      { name: "Vitória", count: 12 },
++    ],
++    topHSCodes: [
++      { name: "84713012 - Máquinas automáticas para processamento de dados", count: 46 },
++      { name: "85044021 - Conversores estáticos", count: 28 },
++      { name: "85423911 - Circuitos integrados", count: 22 },
++      { name: "90328929 - Instrumentos de medição", count: 18 },
++      { name: "90181980 - Equipamentos médicos", count: 12 },
++    ],
++    shipments: [
++      {
++        id: -10101,
++        shipmentNo: "ATL-2024-001",
++        ets: "2024-01-12T00:00:00.000Z",
++        eta: "2024-02-02T00:00:00.000Z",
++        partner: { id: -201, name: "Pacific Traders PTE" },
++        originCountry: "CN",
++        originPort: "Shanghai",
++        destinationCountry: "BR",
++        destinationPort: "Santos",
++        hsCode: "84713012",
++        hsDescription: "Máquinas automáticas para processamento de dados",
++        teus: 18,
++        weightKg: 34000,
++      },
++      {
++        id: -10102,
++        shipmentNo: "ATL-2024-014",
++        ets: "2024-03-08T00:00:00.000Z",
++        eta: "2024-03-30T00:00:00.000Z",
++        partner: { id: -202, name: "Hamburg Forwarding" },
++        originCountry: "DE",
++        originPort: "Hamburgo",
++        destinationCountry: "BR",
++        destinationPort: "Itajaí",
++        hsCode: "85044021",
++        hsDescription: "Conversores estáticos",
++        teus: 12,
++        weightKg: 26500,
++      },
++      {
++        id: -10103,
++        shipmentNo: "ATL-2024-027",
++        ets: "2024-05-16T00:00:00.000Z",
++        eta: "2024-06-05T00:00:00.000Z",
++        partner: { id: -203, name: "Mercurio Logistics" },
++        originCountry: "US",
++        originPort: "Houston",
++        destinationCountry: "BR",
++        destinationPort: "Paranaguá",
++        hsCode: "90328929",
++        hsDescription: "Instrumentos de medição",
++        teus: 9,
++        weightKg: 18900,
++      },
++      {
++        id: -10104,
++        shipmentNo: "ATL-2024-042",
++        ets: "2024-07-03T00:00:00.000Z",
++        eta: "2024-07-24T00:00:00.000Z",
++        partner: { id: -204, name: "Shenzhen Maritime" },
++        originCountry: "CN",
++        originPort: "Yantian",
++        destinationCountry: "BR",
++        destinationPort: "Santos",
++        hsCode: "85423911",
++        hsDescription: "Circuitos integrados",
++        teus: 22,
++        weightKg: 41000,
++      },
++      {
++        id: -10105,
++        shipmentNo: "ATL-2024-058",
++        ets: "2024-09-18T00:00:00.000Z",
++        eta: "2024-10-07T00:00:00.000Z",
++        partner: { id: -205, name: "Pacific Traders PTE" },
++        originCountry: "CN",
++        originPort: "Ningbo",
++        destinationCountry: "BR",
++        destinationPort: "Santos",
++        hsCode: "90181980",
++        hsDescription: "Equipamentos médicos",
++        teus: 14,
++        weightKg: 22300,
++      },
++    ],
++  },
++  {
++    id: -102,
++    name: "Global Export Solutions Inc.",
++    kind: "exporter",
++    countryCode: "US",
++    score: 0.88,
++    metrics: {
++      totalShipments: 132,
++      totalTEUs: 348,
++      totalWeightKg: 302500,
++      uniquePartners: 11,
++    },
++    shipmentsOverTime: [
++      { month: "2023-02", shipments: 9 },
++      { month: "2023-05", shipments: 11 },
++      { month: "2023-08", shipments: 13 },
++      { month: "2023-11", shipments: 14 },
++      { month: "2024-02", shipments: 16 },
++      { month: "2024-05", shipments: 18 },
++      { month: "2024-08", shipments: 19 },
++      { month: "2024-11", shipments: 21 },
++    ],
++    topPartners: [
++      { name: "Grupo Andino Trading", count: 38 },
++      { name: "Port Logistics Brasil", count: 31 },
++      { name: "Lima Freight Solutions", count: 24 },
++      { name: "Caribe Supply Chain", count: 19 },
++      { name: "Andes Consolidators", count: 14 },
++    ],
++    topOriginCountries: [
++      { name: "Estados Unidos", count: 132 },
++      { name: "Canadá", count: 18 },
++      { name: "México", count: 12 },
++      { name: "Chile", count: 9 },
++      { name: "Peru", count: 8 },
++    ],
++    topDestinationPorts: [
++      { name: "Buenos Aires", count: 46 },
++      { name: "Callao", count: 28 },
++      { name: "Cartagena", count: 22 },
++      { name: "Santos", count: 18 },
++      { name: "Valparaíso", count: 14 },
++    ],
++    topHSCodes: [
++      { name: "02013000 - Carne bovina desossada", count: 34 },
++      { name: "15071000 - Óleo de soja", count: 27 },
++      { name: "23040010 - Farelo de soja", count: 21 },
++      { name: "10059010 - Milho", count: 18 },
++      { name: "20041000 - Batatas preparadas", count: 12 },
++    ],
++    shipments: [
++      {
++        id: -10201,
++        shipmentNo: "GES-2024-003",
++        ets: "2024-01-22T00:00:00.000Z",
++        eta: "2024-02-12T00:00:00.000Z",
++        partner: { id: -301, name: "Grupo Andino Trading" },
++        originCountry: "US",
++        originPort: "New Orleans",
++        destinationCountry: "AR",
++        destinationPort: "Buenos Aires",
++        hsCode: "02013000",
++        hsDescription: "Carne bovina desossada",
++        teus: 16,
++        weightKg: 28500,
++      },
++      {
++        id: -10202,
++        shipmentNo: "GES-2024-017",
++        ets: "2024-04-04T00:00:00.000Z",
++        eta: "2024-04-26T00:00:00.000Z",
++        partner: { id: -302, name: "Port Logistics Brasil" },
++        originCountry: "US",
++        originPort: "Houston",
++        destinationCountry: "BR",
++        destinationPort: "Santos",
++        hsCode: "15071000",
++        hsDescription: "Óleo de soja",
++        teus: 12,
++        weightKg: 24300,
++      },
++      {
++        id: -10203,
++        shipmentNo: "GES-2024-029",
++        ets: "2024-06-10T00:00:00.000Z",
++        eta: "2024-06-30T00:00:00.000Z",
++        partner: { id: -303, name: "Lima Freight Solutions" },
++        originCountry: "US",
++        originPort: "Savannah",
++        destinationCountry: "PE",
++        destinationPort: "Callao",
++        hsCode: "23040010",
++        hsDescription: "Farelo de soja",
++        teus: 10,
++        weightKg: 19800,
++      },
++      {
++        id: -10204,
++        shipmentNo: "GES-2024-041",
++        ets: "2024-08-18T00:00:00.000Z",
++        eta: "2024-09-08T00:00:00.000Z",
++        partner: { id: -304, name: "Caribe Supply Chain" },
++        originCountry: "US",
++        originPort: "Miami",
++        destinationCountry: "CO",
++        destinationPort: "Cartagena",
++        hsCode: "20041000",
++        hsDescription: "Batatas preparadas",
++        teus: 8,
++        weightKg: 15400,
++      },
++      {
++        id: -10205,
++        shipmentNo: "GES-2024-055",
++        ets: "2024-10-26T00:00:00.000Z",
++        eta: "2024-11-18T00:00:00.000Z",
++        partner: { id: -305, name: "Andes Consolidators" },
++        originCountry: "US",
++        originPort: "Los Angeles",
++        destinationCountry: "CL",
++        destinationPort: "Valparaíso",
++        hsCode: "10059010",
++        hsDescription: "Milho",
++        teus: 11,
++        weightKg: 17600,
++      },
++    ],
++  },
++];
++
++export const SAMPLE_COMPANY_IDS = new Set(SAMPLE_COMPANIES.map((company) => company.id));
++
++export interface SampleNcmSummary {
++  code: string;
++  description: string;
++  totalShipments: number;
++  totalWeightKg: number;
++  totalTeus: number;
++}
++
++export const SAMPLE_NCMS: SampleNcmSummary[] = [
++  {
++    code: "85044021",
++    description: "Conversores estáticos - importações de tecnologia",
++    totalShipments: 248,
++    totalWeightKg: 512400,
++    totalTeus: 612,
++  },
++  {
++    code: "02013000",
++    description: "Carnes desossadas de bovino - exportações refrigeradas",
++    totalShipments: 186,
++    totalWeightKg: 438900,
++    totalTeus: 512,
++  },
++  {
++    code: "85423911",
++    description: "Circuitos integrados eletrônicos",
++    totalShipments: 162,
++    totalWeightKg: 289500,
++    totalTeus: 384,
++  },
++];
++
++export function searchSampleCompanies(query: string, limit = 10): SampleCompanyData[] {
++  const trimmed = query.trim().toLowerCase();
++  if (!trimmed) {
++    return [];
++  }
++
++  return SAMPLE_COMPANIES.filter((company) => company.name.toLowerCase().includes(trimmed)).slice(0, limit);
++}
++
++export function searchSampleNcms(query: string, limit = 10): SampleNcmSummary[] {
++  const trimmed = query.trim().toLowerCase();
++  if (!trimmed) {
++    return [];
++  }
++
++  return SAMPLE_NCMS.filter((item) =>
++    item.code.toLowerCase().includes(trimmed) || item.description.toLowerCase().includes(trimmed),
++  ).slice(0, limit);
++}
++
++export function getSampleCompanyById(id: number): SampleCompanyData | undefined {
++  return SAMPLE_COMPANIES.find((company) => company.id === id);
++}
++
++export function getSampleNcmByCode(code: string): SampleNcmSummary | undefined {
++  const normalized = code.trim().toLowerCase();
++  return SAMPLE_NCMS.find((item) => item.code.toLowerCase() === normalized);
++}
