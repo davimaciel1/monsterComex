@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { Header } from "@/components/Header";
 import { HeroSearch } from "@/components/HeroSearch";
 import { useLocation } from "wouter";
@@ -6,20 +5,14 @@ import { useAuth } from "@/hooks/useAuth";
 
 export default function Home() {
   const [, setLocation] = useLocation();
-  const { user, isLoading } = useAuth();
-
-  useEffect(() => {
-    if (!isLoading && !user) {
-      setLocation(`/login?redirect=${encodeURIComponent("/")}`);
-    }
-  }, [user, isLoading, setLocation]);
+  const { isLoading } = useAuth();
 
   const handleSearch = (query: string) => {
     console.log('Searching for:', query);
     setLocation(`/search?q=${encodeURIComponent(query)}`);
   };
 
-  if (isLoading || !user) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
