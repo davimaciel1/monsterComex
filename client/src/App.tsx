@@ -8,6 +8,9 @@ import Home from "@/pages/Home";
 import SearchResults from "@/pages/SearchResults";
 import CompanyProfile from "@/pages/CompanyProfile";
 import AdminUpload from "@/pages/AdminUpload";
+import Login from "@/pages/Login";
+import Plans from "@/pages/Plans";
+import NcmProfile from "@/pages/NcmProfile";
 
 function Router() {
   return (
@@ -15,7 +18,10 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/search" component={SearchResults} />
       <Route path="/company/:id" component={CompanyProfile} />
+      <Route path="/ncm/:code" component={NcmProfile} />
       <Route path="/admin/upload" component={AdminUpload} />
+      <Route path="/planos" component={Plans} />
+      <Route path="/login" component={Login} />
       <Route component={NotFound} />
     </Switch>
   );
