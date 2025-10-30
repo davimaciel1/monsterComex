@@ -1,4 +1,4 @@
-import type { 
+import type {
   Company, InsertCompany,
   Shipment, InsertShipment,
   Ingestion, InsertIngestion,
@@ -6,16 +6,23 @@ import type {
 } from "@shared/schema";
 import { db } from "./db";
 
+export function buildCompanyKey(name: string, kind: string): string {
+  return `${kind.trim().toLowerCase()}::${name.trim()}`;
+}
+
 export interface IStorage {
   // Company operations
   searchCompanies(query: string, limit?: number): Promise<{ company: Company; score: number }[]>;
   getCompanyById(id: number): Promise<Company | null>;
   createCompany(company: InsertCompany): Promise<Company>;
   getOrCreateCompany(name: string, kind: 'importer' | 'exporter', countryCode: string): Promise<Company>;
-  
+  upsertCompaniesBatch(companies: InsertCompany[], tx?: any): Promise<Map<string, Company>>;
+  withTransaction<T>(fn: (tx: any) => Promise<T>): Promise<T>;
+
   // Shipment operations
   getShipmentsByCompanyId(companyId: number, limit?: number, offset?: number): Promise<{ shipments: Shipment[]; total: number }>;
   createShipment(shipment: InsertShipment): Promise<Shipment>;
+  createShipmentsBatch(shipments: InsertShipment[], tx?: any): Promise<void>;
   getCompanyStats(companyId: number): Promise<{
     totalShipments: number;
     totalTEUs: number;
@@ -36,42 +43,84 @@ export interface IStorage {
   
   // Error log operations
   createErrorLog(errorLog: InsertErrorLog): Promise<ErrorLog>;
+  createErrorLogsBatch(errorLogs: InsertErrorLog[], tx?: any): Promise<void>;
   getErrorLogsByIngestionId(ingestionId: number): Promise<ErrorLog[]>;
-  createErrorLogsBatch(errorLogs: InsertErrorLog[]): Promise<void>;
-  
-  // Batch operations
-  upsertCompaniesBatch(companies: InsertCompany[], tx?: any): Promise<Map<string, Company>>;
-  createShipmentsBatch(shipments: InsertShipment[], tx?: any): Promise<void>;
-  withTransaction<T>(callback: (tx: any) => Promise<T>): Promise<T>;
 }
 
 export class DatabaseStorage implements IStorage {
   constructor(private db: any) {}
-  
+
+  async withTransaction<T>(fn: (tx: any) => Promise<T>): Promise<T> {
+    return this.db.transaction(fn);
+  }
+
   async searchCompanies(query: string, limit = 10): Promise<{ company: Company; score: number }[]> {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
+      return [];
+    }
+
     const { companies } = await import("@shared/schema");
-    const { ilike, sql, desc } = await import("drizzle-orm");
-    
-    // Simple fuzzy search using ILIKE with % wildcard
-    const results = await this.db
-      .select()
-      .from(companies)
-      .where(ilike(companies.name, `%${query}%`))
-      .limit(limit);
-    
-    // Calculate simple similarity score based on position of match
-    return results.map((company: Company) => {
-      const lowerName = company.name.toLowerCase();
-      const lowerQuery = query.toLowerCase();
-      const index = lowerName.indexOf(lowerQuery);
-      
-      // Score: 1.0 if exact match at start, decreasing based on position
-      const score = index === 0 ? 1.0 : 
-                   index > 0 ? 1.0 - (index / lowerName.length) * 0.5 : 
-                   0.5;
-      
-      return { company, score };
-    }).sort((a: { score: number }, b: { score: number }) => b.score - a.score);
+    const { sql, ilike } = await import("drizzle-orm");
+
+    const trigramResults = await this.db.execute(sql`
+      select
+        c.id,
+        c.name,
+        c.kind,
+        c.country_code as "countryCode",
+        c.created_at as "createdAt",
+        word_similarity(c.name, ${trimmedQuery}) as score
+      from companies c
+      where c.name % ${trimmedQuery}
+      order by score desc
+      limit ${limit}
+    `);
+
+    const scoredResults: { company: Company; score: number }[] = trigramResults.rows.map((row: any) => ({
+      company: {
+        id: row.id,
+        name: row.name,
+        kind: row.kind,
+        countryCode: row.countryCode,
+        createdAt: row.createdAt,
+      },
+      score: typeof row.score === "number" ? row.score : Number(row.score ?? 0),
+    }));
+
+    const seenIds = new Set(scoredResults.map((entry) => entry.company.id));
+
+    if (scoredResults.length < limit) {
+      const fallbackCandidates = await this.db
+        .select()
+        .from(companies)
+        .where(ilike(companies.name, `%${trimmedQuery}%`))
+        .orderBy(companies.name)
+        .limit(limit * 2);
+
+      const calculateFallbackScore = (name: string, search: string): number => {
+        const lowerName = name.toLowerCase();
+        const lowerQuery = search.toLowerCase();
+        const index = lowerName.indexOf(lowerQuery);
+
+        if (index === -1) return 0.1;
+        if (index === 0 && lowerName === lowerQuery) return 1;
+        if (index === 0) return 0.9;
+        return Math.max(0.1, 0.7 - (index / Math.max(lowerName.length, 1)) * 0.5);
+      };
+
+      for (const company of fallbackCandidates) {
+        if (seenIds.has(company.id)) continue;
+        scoredResults.push({
+          company,
+          score: calculateFallbackScore(company.name, trimmedQuery),
+        });
+        seenIds.add(company.id);
+        if (scoredResults.length >= limit) break;
+      }
+    }
+
+    return scoredResults.slice(0, limit);
   }
   
   async getCompanyById(id: number): Promise<Company | null> {
@@ -88,49 +137,116 @@ export class DatabaseStorage implements IStorage {
   }
   
   async createCompany(company: InsertCompany): Promise<Company> {
-    const { companies } = await import("@shared/schema");
-    
-    const result = await this.db
-      .insert(companies)
-      .values(company)
-      .returning();
-    
-    return result[0];
-  }
-  
-  async getOrCreateCompany(name: string, kind: 'importer' | 'exporter', countryCode: string): Promise<Company> {
-    const { companies } = await import("@shared/schema");
-    const { eq, and } = await import("drizzle-orm");
-    
-    // Try to find existing company
-    const existing = await this.db
-      .select()
-      .from(companies)
-      .where(and(
-        eq(companies.name, name),
-        eq(companies.kind, kind)
-      ))
-      .limit(1);
-    
-    if (existing[0]) {
-      return existing[0];
+    const sanitizedName = company.name.trim();
+    const sanitizedKind = company.kind.trim().toLowerCase();
+    const sanitizedCountry = company.countryCode.trim() || "Unknown";
+
+    const companiesMap = await this.upsertCompaniesBatch([
+      {
+        ...company,
+        name: sanitizedName,
+        kind: sanitizedKind,
+        countryCode: sanitizedCountry,
+      },
+    ]);
+
+    const created = companiesMap.get(buildCompanyKey(sanitizedName, sanitizedKind));
+    if (!created) {
+      throw new Error(`Falha ao criar empresa ${sanitizedName}`);
     }
-    
-    // Create new company
-    return this.createCompany({ name, kind, countryCode });
+
+    return created;
+  }
+
+  async getOrCreateCompany(name: string, kind: 'importer' | 'exporter', countryCode: string): Promise<Company> {
+    const sanitizedName = name.trim();
+    const normalizedKind = kind.trim().toLowerCase() as typeof kind;
+    const sanitizedCountry = countryCode.trim() || "Unknown";
+
+    const companiesMap = await this.upsertCompaniesBatch([
+      { name: sanitizedName, kind: normalizedKind, countryCode: sanitizedCountry },
+    ]);
+
+    const company = companiesMap.get(buildCompanyKey(sanitizedName, normalizedKind));
+    if (!company) {
+      throw new Error(`Falha ao recuperar empresa ${sanitizedName}`);
+    }
+
+    return company;
+  }
+
+  async upsertCompaniesBatch(companiesToUpsert: InsertCompany[], tx: any = this.db): Promise<Map<string, Company>> {
+    const deduped = new Map<string, InsertCompany>();
+
+    for (const entry of companiesToUpsert) {
+      if (!entry) continue;
+      const sanitizedName = entry.name.trim();
+      if (!sanitizedName) continue;
+      const sanitizedKind = entry.kind.trim().toLowerCase();
+      if (!sanitizedKind) continue;
+      const sanitizedCountry = (entry.countryCode ?? "").trim() || "Unknown";
+
+      const normalized: InsertCompany = {
+        ...entry,
+        name: sanitizedName,
+        kind: sanitizedKind,
+        countryCode: sanitizedCountry,
+      };
+
+      deduped.set(buildCompanyKey(normalized.name, normalized.kind), normalized);
+    }
+
+    if (deduped.size === 0) {
+      return new Map();
+    }
+
+    const values = Array.from(deduped.values());
+    const { companies } = await import("@shared/schema");
+    const { sql } = await import("drizzle-orm");
+
+    const rows = await tx
+      .insert(companies)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [companies.name, companies.kind],
+        set: {
+          countryCode: sql`coalesce(nullif(excluded.country_code, 'Unknown'), ${companies.countryCode})`,
+        },
+      })
+      .returning();
+
+    const resultMap = new Map<string, Company>();
+    for (const row of rows) {
+      resultMap.set(buildCompanyKey(row.name, row.kind), row);
+    }
+
+    if (resultMap.size < deduped.size) {
+      const missingValues = values.filter((value) => !resultMap.has(buildCompanyKey(value.name, value.kind)));
+      if (missingValues.length > 0) {
+        const conditions = missingValues.map((item) => sql`(${companies.name} = ${item.name} and ${companies.kind} = ${item.kind})`);
+        const existing = await tx
+          .select()
+          .from(companies)
+          .where(sql.join(conditions, sql` or `));
+
+        for (const row of existing) {
+          resultMap.set(buildCompanyKey(row.name, row.kind), row);
+        }
+      }
+    }
+
+    return resultMap;
   }
   
   async getShipmentsByCompanyId(companyId: number, limit = 10, offset = 0): Promise<{ shipments: any[]; total: number }> {
     const { shipments, companies } = await import("@shared/schema");
     const { eq, count, desc, or } = await import("drizzle-orm");
     
-    // Check if this company is an importer or exporter
     const company = await this.getCompanyById(companyId);
     if (!company) {
       return { shipments: [], total: 0 };
     }
     
-    // If importer, search by partner_id; if exporter, search by company_id
     const whereCondition = company.kind === 'importer' 
       ? eq(shipments.partnerId, companyId)
       : eq(shipments.companyId, companyId);
@@ -177,13 +293,22 @@ export class DatabaseStorage implements IStorage {
   
   async createShipment(shipment: InsertShipment): Promise<Shipment> {
     const { shipments } = await import("@shared/schema");
-    
+
     const result = await this.db
       .insert(shipments)
       .values(shipment)
       .returning();
-    
+
     return result[0];
+  }
+
+  async createShipmentsBatch(shipmentsToInsert: InsertShipment[], tx: any = this.db): Promise<void> {
+    if (!shipmentsToInsert.length) {
+      return;
+    }
+
+    const { shipments } = await import("@shared/schema");
+    await tx.insert(shipments).values(shipmentsToInsert);
   }
   
   async getCompanyStats(companyId: number): Promise<{
@@ -212,24 +337,23 @@ export class DatabaseStorage implements IStorage {
       .select({
         totalShipments: count(),
         totalTEUs: sum(shipments.teus),
-        totalWeightKg: sum(shipments.weightKg),
-        uniquePartners: countDistinct(partnerColumn)
+        totalWeightKg: sql<string>`sum(CAST(${shipments.weightKg} AS DECIMAL))`,
+        uniquePartners: countDistinct(partnerColumn),
       })
       .from(shipments)
       .where(whereCondition);
     
-    const stats = result[0];
     return {
-      totalShipments: stats?.totalShipments || 0,
-      totalTEUs: Number(stats?.totalTEUs || 0),
-      totalWeightKg: Number(stats?.totalWeightKg || 0),
-      uniquePartners: stats?.uniquePartners || 0
+      totalShipments: result[0]?.totalShipments || 0,
+      totalTEUs: result[0]?.totalTEUs || 0,
+      totalWeightKg: parseFloat(result[0]?.totalWeightKg || '0'),
+      uniquePartners: result[0]?.uniquePartners || 0,
     };
   }
   
   async getCompanyShipmentsOverTime(companyId: number): Promise<Array<{ month: string; shipments: number }>> {
     const { shipments } = await import("@shared/schema");
-    const { eq, count, sql } = await import("drizzle-orm");
+    const { eq, sql, desc } = await import("drizzle-orm");
     
     const company = await this.getCompanyById(companyId);
     if (!company) return [];
@@ -241,7 +365,7 @@ export class DatabaseStorage implements IStorage {
     const result = await this.db
       .select({
         month: sql<string>`TO_CHAR(${shipments.ets}, 'YYYY-MM')`,
-        shipments: count()
+        shipments: sql<number>`count(*)::int`,
       })
       .from(shipments)
       .where(whereCondition)
@@ -439,15 +563,24 @@ export class DatabaseStorage implements IStorage {
   
   async createErrorLog(errorLog: InsertErrorLog): Promise<ErrorLog> {
     const { errorLogs } = await import("@shared/schema");
-    
+
     const result = await this.db
       .insert(errorLogs)
       .values(errorLog)
       .returning();
-    
+
     return result[0];
   }
-  
+
+  async createErrorLogsBatch(errorLogsToInsert: InsertErrorLog[], tx: any = this.db): Promise<void> {
+    if (!errorLogsToInsert.length) {
+      return;
+    }
+
+    const { errorLogs } = await import("@shared/schema");
+    await tx.insert(errorLogs).values(errorLogsToInsert);
+  }
+
   async getErrorLogsByIngestionId(ingestionId: number): Promise<ErrorLog[]> {
     const { errorLogs } = await import("@shared/schema");
     const { eq } = await import("drizzle-orm");
@@ -458,91 +591,6 @@ export class DatabaseStorage implements IStorage {
       .where(eq(errorLogs.ingestionId, ingestionId))
       .orderBy(errorLogs.rowNumber);
   }
-  
-  async createErrorLogsBatch(errorLogs: InsertErrorLog[]): Promise<void> {
-    if (!errorLogs.length) return;
-    const { errorLogs: errorLogsTable } = await import("@shared/schema");
-    
-    await this.db
-      .insert(errorLogsTable)
-      .values(errorLogs);
-  }
-  
-  async withTransaction<T>(callback: (tx: any) => Promise<T>): Promise<T> {
-    return await this.db.transaction(callback);
-  }
-  
-  async upsertCompaniesBatch(companies: InsertCompany[], tx?: any): Promise<Map<string, Company>> {
-    const db = tx ?? this.db;
-    const { companies: companiesTable } = await import("@shared/schema");
-    const { eq, and } = await import("drizzle-orm");
-    
-    const companyMap = new Map<string, Company>();
-    
-    if (!companies.length) return companyMap;
-    
-    const uniqueCompanies = new Map<string, InsertCompany>();
-    for (const company of companies) {
-      const key = buildCompanyKey(company.name, company.kind);
-      if (!uniqueCompanies.has(key)) {
-        uniqueCompanies.set(key, company);
-      }
-    }
-    
-    for (const [key, company] of Array.from(uniqueCompanies.entries())) {
-      const existing = await db
-        .select()
-        .from(companiesTable)
-        .where(and(
-          eq(companiesTable.name, company.name),
-          eq(companiesTable.kind, company.kind)
-        ))
-        .limit(1);
-      
-      if (existing[0]) {
-        companyMap.set(key, existing[0]);
-      } else {
-        const result = await db
-          .insert(companiesTable)
-          .values(company)
-          .onConflictDoNothing()
-          .returning();
-        
-        if (result[0]) {
-          companyMap.set(key, result[0]);
-        } else {
-          const retry = await db
-            .select()
-            .from(companiesTable)
-            .where(and(
-              eq(companiesTable.name, company.name),
-              eq(companiesTable.kind, company.kind)
-            ))
-            .limit(1);
-          
-          if (retry[0]) {
-            companyMap.set(key, retry[0]);
-          }
-        }
-      }
-    }
-    
-    return companyMap;
-  }
-  
-  async createShipmentsBatch(shipments: InsertShipment[], tx?: any): Promise<void> {
-    if (!shipments.length) return;
-    const db = tx ?? this.db;
-    const { shipments: shipmentsTable } = await import("@shared/schema");
-    
-    await db
-      .insert(shipmentsTable)
-      .values(shipments);
-  }
-}
-
-export function buildCompanyKey(name: string, kind: string): string {
-  return `${name}::${kind}`;
 }
 
 export const storage = new DatabaseStorage(db);
