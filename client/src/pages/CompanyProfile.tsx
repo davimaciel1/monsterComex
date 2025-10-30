@@ -24,37 +24,42 @@ export default function CompanyProfile() {
     enabled: companyId > 0,
   });
 
-  const { data: stats } = useQuery({
+  const { data: stats } = useQuery<{
+    totalShipments: number;
+    totalTEUs: number;
+    totalWeightKg: number;
+    uniquePartners: number;
+  }>({
     queryKey: [`/api/companies/${companyId}/stats`],
     enabled: companyId > 0,
   });
 
-  const { data: chartData = [] } = useQuery({
+  const { data: chartData = [] } = useQuery<Array<{ month: string; shipments: number }>>({
     queryKey: [`/api/companies/${companyId}/shipments-over-time`],
     enabled: companyId > 0,
   });
 
-  const { data: topPartners = [] } = useQuery({
+  const { data: topPartners = [] } = useQuery<Array<{ name: string; count: number }>>({
     queryKey: [`/api/companies/${companyId}/top-partners`],
     enabled: companyId > 0,
   });
 
-  const { data: topOriginCountries = [] } = useQuery({
+  const { data: topOriginCountries = [] } = useQuery<Array<{ name: string; count: number }>>({
     queryKey: [`/api/companies/${companyId}/top-origin-countries`],
     enabled: companyId > 0,
   });
 
-  const { data: topDestinationPorts = [] } = useQuery({
+  const { data: topDestinationPorts = [] } = useQuery<Array<{ name: string; count: number }>>({
     queryKey: [`/api/companies/${companyId}/top-destination-ports`],
     enabled: companyId > 0,
   });
 
-  const { data: topHSCodes = [] } = useQuery({
+  const { data: topHSCodes = [] } = useQuery<Array<{ name: string; count: number }>>({
     queryKey: [`/api/companies/${companyId}/top-hs-codes`],
     enabled: companyId > 0,
   });
 
-  const { data: shipmentsData } = useQuery({
+  const { data: shipmentsData } = useQuery<{ shipments: any[]; total: number }>({
     queryKey: [`/api/companies/${companyId}/shipments`],
     enabled: companyId > 0,
   });
@@ -70,7 +75,20 @@ export default function CompanyProfile() {
     );
   }
 
-  const shipments = shipmentsData?.shipments || [];
+  const rawShipments = shipmentsData?.shipments || [];
+  
+  const shipments = rawShipments.map((s: any) => ({
+    id: s.id,
+    shipmentNo: s.shipmentNo || '-',
+    ets: s.ets ? new Date(s.ets).toLocaleDateString('pt-BR') : '-',
+    eta: s.eta ? new Date(s.eta).toLocaleDateString('pt-BR') : '-',
+    partner: s.partner?.name || '-',
+    origin: s.originPort || s.originCountry || '-',
+    destination: s.destinationPort || s.destinationCountry || '-',
+    hsCode: s.hsCode || '-',
+    teus: s.teus || 0,
+    weight: s.weightKg ? parseFloat(s.weightKg) : 0,
+  }));
 
   return (
     <div className="min-h-screen bg-background">

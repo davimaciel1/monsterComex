@@ -95,8 +95,8 @@ export function ShipmentsTable({ shipments, onExport }: ShipmentsTableProps) {
                 <td className="p-3 text-sm">{shipment.origin}</td>
                 <td className="p-3 text-sm">{shipment.destination}</td>
                 <td className="p-3 text-sm font-mono">{shipment.hsCode}</td>
-                <td className="p-3 text-sm font-mono text-right">{shipment.teus}</td>
-                <td className="p-3 text-sm font-mono text-right">{shipment.weight.toLocaleString()}</td>
+                <td className="p-3 text-sm font-mono text-right">{shipment.teus || 0}</td>
+                <td className="p-3 text-sm font-mono text-right">{shipment.weight?.toLocaleString() || '0'}</td>
               </tr>
             ))}
           </tbody>

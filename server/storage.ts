@@ -114,18 +114,36 @@ export class DatabaseStorage implements IStorage {
     return this.createCompany({ name, kind, countryCode });
   }
   
-  async getShipmentsByCompanyId(companyId: number, limit = 10, offset = 0): Promise<{ shipments: Shipment[]; total: number }> {
-    const { shipments } = await import("@shared/schema");
-    const { eq, count } = await import("drizzle-orm");
+  async getShipmentsByCompanyId(companyId: number, limit = 10, offset = 0): Promise<{ shipments: any[]; total: number }> {
+    const { shipments, companies } = await import("@shared/schema");
+    const { eq, count, desc } = await import("drizzle-orm");
     
     const [shipmentsResult, totalResult] = await Promise.all([
       this.db
-        .select()
+        .select({
+          id: shipments.id,
+          shipmentNo: shipments.shipmentNo,
+          ets: shipments.ets,
+          eta: shipments.eta,
+          originCountry: shipments.originCountry,
+          originPort: shipments.originPort,
+          destinationCountry: shipments.destinationCountry,
+          destinationPort: shipments.destinationPort,
+          hsCode: shipments.hsCode,
+          hsDescription: shipments.hsDescription,
+          teus: shipments.teus,
+          weightKg: shipments.weightKg,
+          partner: {
+            id: companies.id,
+            name: companies.name,
+          }
+        })
         .from(shipments)
+        .leftJoin(companies, eq(shipments.partnerId, companies.id))
         .where(eq(shipments.companyId, companyId))
         .limit(limit)
         .offset(offset)
-        .orderBy(shipments.ets),
+        .orderBy(desc(shipments.ets)),
       this.db
         .select({ count: count() })
         .from(shipments)
