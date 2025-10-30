@@ -62,6 +62,9 @@ Preferred communication style: Simple, everyday language.
 - Job queue system for background processing of large files
 
 **Data Processing & Normalization**
+- **Flexible header mapping**: Automatically recognizes Portuguese and English column names (e.g., "Nome da Empresa", "Razão Social", "Company Name" all map to `company_name`)
+- **Accent normalization**: Removes diacritics and standardizes text (e.g., "Número do Embarque" → "numerodoembarque")
+- **Company kind translation**: Supports multiple variations (importador/exportador, buyer/seller, comprador/vendedor)
 - Company name canonization and fuzzy matching (designed for pg_trgm extension usage)
 - Country code normalization to ISO-3166 standard
 - Port mapping to UN/LOCODE format

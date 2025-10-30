@@ -1,0 +1,243 @@
+diff --git a/server/etl.ts b/server/etl.ts
+index 338a323bb9ccf706cbbfc1595ebe1609df120dff..ffc8786c5b0058b55e00a189fe86a3390ad3db20 100644
+--- a/server/etl.ts
++++ b/server/etl.ts
+@@ -1,70 +1,169 @@
+ import * as XLSX from "xlsx";
+ import fs from "fs";
+ import path from "path";
+ import { storage } from "./storage";
+-import type { Ingestion } from "@shared/schema";
+ 
+ interface ShipmentRow {
+   company_name?: string;
+   company_kind?: string;
+   company_country?: string;
+   shipment_no?: string;
+   ets?: string;
+   eta?: string;
+   partner_name?: string;
+   partner_country?: string;
+   origin_country?: string;
+   origin_port?: string;
+   destination_country?: string;
+   destination_port?: string;
+   hs_code?: string;
+   hs_description?: string;
+   teus?: string | number;
+   weight_kg?: string | number;
+ }
+ 
++type CanonicalShipmentField = keyof ShipmentRow;
++
++const HEADER_MAPPINGS: Record<string, CanonicalShipmentField> = {
++  companyname: "company_name",
++  nomedaempresa: "company_name",
++  razaosocial: "company_name",
++  empresanome: "company_name",
++  companykind: "company_kind",
++  tipodeempresa: "company_kind",
++  tipoempresa: "company_kind",
++  importadorouexportador: "company_kind",
++  companycountry: "company_country",
++  paisdaempresa: "company_country",
++  paisempresa: "company_country",
++  shipmentno: "shipment_no",
++  numerodoembarque: "shipment_no",
++  conhecimento: "shipment_no",
++  ets: "ets",
++  dataets: "ets",
++  eta: "eta",
++  dataeta: "eta",
++  partnername: "partner_name",
++  nomeparceiro: "partner_name",
++  parceiro: "partner_name",
++  partnercountry: "partner_country",
++  paisparceiro: "partner_country",
++  origincountry: "origin_country",
++  paisorigem: "origin_country",
++  originport: "origin_port",
++  portoorigem: "origin_port",
++  destinationcountry: "destination_country",
++  paisdestino: "destination_country",
++  destinationport: "destination_port",
++  portodestino: "destination_port",
++  hscode: "hs_code",
++  ncm: "hs_code",
++  hsdescription: "hs_description",
++  descricaoncm: "hs_description",
++  teus: "teus",
++  teu: "teus",
++  weightkg: "weight_kg",
++  pesokg: "weight_kg",
++  peso: "weight_kg",
++};
++
++const COMPANY_KIND_MAPPINGS: Record<string, "importer" | "exporter"> = {
++  importer: "importer",
++  importador: "importer",
++  importadores: "importer",
++  comprador: "importer",
++  buyer: "importer",
++  exporter: "exporter",
++  exportador: "exporter",
++  exportadores: "exporter",
++  vendedor: "exporter",
++  seller: "exporter",
++};
++
++function normalizeKey(rawKey: string): string {
++  return rawKey
++    .toString()
++    .trim()
++    .normalize("NFD")
++    .replace(/[\u0300-\u036f]/g, "")
++    .toLowerCase()
++    .replace(/[^a-z0-9]/g, "");
++}
++
++function normalizeCompanyKind(kind: string | undefined): string | undefined {
++  if (!kind) return undefined;
++  const normalized = normalizeKey(kind);
++  return COMPANY_KIND_MAPPINGS[normalized] ?? kind.trim().toLowerCase();
++}
++
++function normalizeShipmentRow(row: ShipmentRow): ShipmentRow {
++  const normalizedRow: ShipmentRow = {};
++
++  for (const [key, value] of Object.entries(row)) {
++    if (value === undefined || value === null) continue;
++    const normalizedKey = normalizeKey(key);
++    const mappedKey = HEADER_MAPPINGS[normalizedKey] ?? key;
++    (normalizedRow as Record<string, unknown>)[mappedKey] =
++      typeof value === "string" ? value.trim() : value;
++  }
++
++  if (normalizedRow.company_kind) {
++    normalizedRow.company_kind = normalizeCompanyKind(
++      normalizedRow.company_kind
++    );
++  }
++
++  return normalizedRow;
++}
++
++function normalizeShipmentRows(rows: ShipmentRow[]): ShipmentRow[] {
++  return rows.map((row) => normalizeShipmentRow(row));
++}
++
+ export async function processShipmentFile(filePath: string, ingestionId: number): Promise<void> {
+   try {
+     // Update ingestion status to processing
+     await storage.updateIngestion(ingestionId, {
+       status: 'processing',
+       startedAt: new Date(),
+     });
+ 
+     // Read the file based on extension
+     const ext = path.extname(filePath).toLowerCase();
+     let rows: ShipmentRow[] = [];
+ 
+     if (ext === '.csv') {
+       rows = await readCSVFile(filePath);
+     } else if (ext === '.xlsx' || ext === '.xls') {
+       rows = await readExcelFile(filePath);
+     } else {
+       throw new Error('Formato de arquivo não suportado');
+     }
+ 
++    rows = normalizeShipmentRows(rows);
++
+     // Process each row
+     let rowsOk = 0;
+     let rowsFailed = 0;
+     const totalRows = rows.length;
+ 
+     for (let i = 0; i < rows.length; i++) {
+       const row = rows[i];
+       const rowNumber = i + 1;
+ 
+       try {
+         await processShipmentRow(row, ingestionId);
+         rowsOk++;
+       } catch (error: any) {
+         rowsFailed++;
+         
+         // Log the error
+         await storage.createErrorLog({
+           ingestionId,
+           rowNumber,
+           errorMessage: error.message,
+           rowData: JSON.stringify(row),
+         });
+       }
+     }
+ 
+@@ -102,62 +201,64 @@ async function readExcelFile(filePath: string): Promise<ShipmentRow[]> {
+   
+   // Convert to JSON with header row
+   const data = XLSX.utils.sheet_to_json<ShipmentRow>(worksheet, {
+     raw: false,
+     defval: undefined,
+   });
+   
+   return data;
+ }
+ 
+ async function readCSVFile(filePath: string): Promise<ShipmentRow[]> {
+   const workbook = XLSX.readFile(filePath);
+   const sheetName = workbook.SheetNames[0];
+   const worksheet = workbook.Sheets[sheetName];
+   
+   const data = XLSX.utils.sheet_to_json<ShipmentRow>(worksheet, {
+     raw: false,
+     defval: undefined,
+   });
+   
+   return data;
+ }
+ 
+ async function processShipmentRow(row: ShipmentRow, ingestionId: number): Promise<void> {
+   // Validate required fields
+-  if (!row.company_name || !row.company_kind) {
++  const companyKind = normalizeCompanyKind(row.company_kind);
++
++  if (!row.company_name || !companyKind) {
+     throw new Error('Campos obrigatórios faltando: company_name, company_kind');
+   }
+ 
+-  if (!['importer', 'exporter'].includes(row.company_kind.toLowerCase())) {
++  if (!['importer', 'exporter'].includes(companyKind)) {
+     throw new Error('company_kind deve ser "importer" ou "exporter"');
+   }
+ 
+   // Get or create company
+   const company = await storage.getOrCreateCompany(
+     row.company_name.trim(),
+-    row.company_kind.toLowerCase() as 'importer' | 'exporter',
++    companyKind as 'importer' | 'exporter',
+     row.company_country?.trim() || 'Unknown'
+   );
+ 
+   // Get or create partner company (if provided)
+   let partnerId: number | undefined = undefined;
+   if (row.partner_name) {
+     const partnerKind = company.kind === 'importer' ? 'exporter' : 'importer';
+     const partner = await storage.getOrCreateCompany(
+       row.partner_name.trim(),
+       partnerKind,
+       row.partner_country?.trim() || 'Unknown'
+     );
+     partnerId = partner.id;
+   }
+ 
+   // Parse dates
+   const ets = row.ets ? parseDate(row.ets) : undefined;
+   const eta = row.eta ? parseDate(row.eta) : undefined;
+ 
+   // Parse numeric fields
+   const teus = row.teus ? parseInt(String(row.teus)) : undefined;
+   const weightKg = row.weight_kg ? parseFloat(String(row.weight_kg)) : undefined;
+ 
+   // Create shipment
+   await storage.createShipment({

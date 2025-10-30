@@ -2,7 +2,6 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import { storage } from "./storage";
-import type { Ingestion } from "@shared/schema";
 
 interface ShipmentRow {
   company_name?: string;
@@ -21,6 +20,104 @@ interface ShipmentRow {
   hs_description?: string;
   teus?: string | number;
   weight_kg?: string | number;
+}
+
+type CanonicalShipmentField = keyof ShipmentRow;
+
+const HEADER_MAPPINGS: Record<string, CanonicalShipmentField> = {
+  companyname: "company_name",
+  nomedaempresa: "company_name",
+  razaosocial: "company_name",
+  empresanome: "company_name",
+  companykind: "company_kind",
+  tipodeempresa: "company_kind",
+  tipoempresa: "company_kind",
+  importadorouexportador: "company_kind",
+  companycountry: "company_country",
+  paisdaempresa: "company_country",
+  paisempresa: "company_country",
+  shipmentno: "shipment_no",
+  numerodoembarque: "shipment_no",
+  conhecimento: "shipment_no",
+  ets: "ets",
+  dataets: "ets",
+  eta: "eta",
+  dataeta: "eta",
+  partnername: "partner_name",
+  nomeparceiro: "partner_name",
+  parceiro: "partner_name",
+  partnercountry: "partner_country",
+  paisparceiro: "partner_country",
+  origincountry: "origin_country",
+  paisorigem: "origin_country",
+  originport: "origin_port",
+  portoorigem: "origin_port",
+  destinationcountry: "destination_country",
+  paisdestino: "destination_country",
+  destinationport: "destination_port",
+  portodestino: "destination_port",
+  hscode: "hs_code",
+  ncm: "hs_code",
+  hsdescription: "hs_description",
+  descricaoncm: "hs_description",
+  teus: "teus",
+  teu: "teus",
+  weightkg: "weight_kg",
+  pesokg: "weight_kg",
+  peso: "weight_kg",
+};
+
+const COMPANY_KIND_MAPPINGS: Record<string, "importer" | "exporter"> = {
+  importer: "importer",
+  importador: "importer",
+  importadores: "importer",
+  comprador: "importer",
+  buyer: "importer",
+  exporter: "exporter",
+  exportador: "exporter",
+  exportadores: "exporter",
+  vendedor: "exporter",
+  seller: "exporter",
+};
+
+function normalizeKey(rawKey: string): string {
+  return rawKey
+    .toString()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeCompanyKind(kind: string | undefined): string | undefined {
+  if (!kind) return undefined;
+  const normalized = normalizeKey(kind);
+  return COMPANY_KIND_MAPPINGS[normalized] ?? kind.trim().toLowerCase();
+}
+
+function normalizeShipmentRow(row: ShipmentRow): ShipmentRow {
+  const normalizedRow: ShipmentRow = {};
+
+  for (const [key, value] of Object.entries(row)) {
+    if (value === undefined || value === null) continue;
+    const normalizedKey = normalizeKey(key);
+    const mappedKey = HEADER_MAPPINGS[normalizedKey] ?? key;
+    (normalizedRow as Record<string, unknown>)[mappedKey] =
+      typeof value === "string" ? value.trim() : value;
+  }
+
+  if (normalizedRow.company_kind) {
+    normalizedRow.company_kind = normalizeCompanyKind(
+      normalizedRow.company_kind
+    );
+  }
+
+  return normalizedRow;
+}
+
+function normalizeShipmentRows(rows: ShipmentRow[]): ShipmentRow[] {
+  return rows.map((row) => normalizeShipmentRow(row));
 }
 
 export async function processShipmentFile(filePath: string, ingestionId: number): Promise<void> {
@@ -42,6 +139,8 @@ export async function processShipmentFile(filePath: string, ingestionId: number)
     } else {
       throw new Error('Formato de arquivo não suportado');
     }
+
+    rows = normalizeShipmentRows(rows);
 
     // Process each row
     let rowsOk = 0;
@@ -124,18 +223,20 @@ async function readCSVFile(filePath: string): Promise<ShipmentRow[]> {
 
 async function processShipmentRow(row: ShipmentRow, ingestionId: number): Promise<void> {
   // Validate required fields
-  if (!row.company_name || !row.company_kind) {
+  const companyKind = normalizeCompanyKind(row.company_kind);
+
+  if (!row.company_name || !companyKind) {
     throw new Error('Campos obrigatórios faltando: company_name, company_kind');
   }
 
-  if (!['importer', 'exporter'].includes(row.company_kind.toLowerCase())) {
+  if (!['importer', 'exporter'].includes(companyKind)) {
     throw new Error('company_kind deve ser "importer" ou "exporter"');
   }
 
   // Get or create company
   const company = await storage.getOrCreateCompany(
     row.company_name.trim(),
-    row.company_kind.toLowerCase() as 'importer' | 'exporter',
+    companyKind as 'importer' | 'exporter',
     row.company_country?.trim() || 'Unknown'
   );
 
