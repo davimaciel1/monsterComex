@@ -1,0 +1,226 @@
+diff --git a/client/src/pages/Plans.tsx b/client/src/pages/Plans.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..92e79d10ac320546be58e2396e4150f618d8b397
+--- /dev/null
++++ b/client/src/pages/Plans.tsx
+@@ -0,0 +1,220 @@
++import { useEffect, useMemo, useState } from "react";
++import { useLocation } from "wouter";
++import { Header } from "@/components/Header";
++import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
++import { Button } from "@/components/ui/button";
++import { Label } from "@/components/ui/label";
++import { Slider } from "@/components/ui/slider";
++import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
++import { useAuth } from "@/hooks/useAuth";
++import { useToast } from "@/hooks/use-toast";
++import { calculatePlanQuote } from "@shared/pricing";
++
++function formatCurrency(value: number) {
++  return new Intl.NumberFormat("pt-BR", {
++    style: "currency",
++    currency: "BRL",
++    maximumFractionDigits: 2,
++  }).format(value);
++}
++
++export default function Plans() {
++  const { user, plan, usage, isLoading, subscribe, subscribeStatus } = useAuth();
++  const { toast } = useToast();
++  const [location, setLocation] = useLocation();
++  const [selection, setSelection] = useState({
++    importerQuota: 1,
++    exporterQuota: 0,
++    ncmQuota: 0,
++    billingCycle: "monthly" as "monthly" | "annual",
++  });
++
++  useEffect(() => {
++    if (!isLoading && !user) {
++      setLocation(`/login?redirect=${encodeURIComponent("/planos")}`);
++    }
++  }, [user, isLoading, setLocation]);
++
++  useEffect(() => {
++    if (plan) {
++      setSelection({
++        importerQuota: plan.importerQuota || 0,
++        exporterQuota: plan.exporterQuota || 0,
++        ncmQuota: plan.ncmQuota || 0,
++        billingCycle: plan.billingCycle,
++      });
++    }
++  }, [plan]);
++
++  const quote = useMemo(() => calculatePlanQuote({
++    importerSlots: selection.importerQuota,
++    exporterSlots: selection.exporterQuota,
++    ncmSlots: selection.ncmQuota,
++  }), [selection.importerQuota, selection.exporterQuota, selection.ncmQuota]);
++
++  const totalUnits = quote.totalUnits;
++  const monthlyPrice = quote.monthlyTotal;
++  const annualPrice = quote.annualTotal;
++  const discountPercentage = quote.discountPercentage;
++
++  const handleSubscribe = async () => {
++    if (totalUnits === 0) {
++      toast({
++        title: "Selecione sua franquia",
++        description: "Escolha quantos importadores, exportadores ou NCMs deseja consultar.",
++        variant: "destructive",
++      });
++      return;
++    }
++
++    try {
++      await subscribe({
++        importerQuota: selection.importerQuota,
++        exporterQuota: selection.exporterQuota,
++        ncmQuota: selection.ncmQuota,
++        billingCycle: selection.billingCycle,
++      });
++      toast({
++        title: "Plano atualizado com sucesso",
++        description: "Você já pode iniciar ou ampliar suas consultas.",
++      });
++      setLocation("/");
++    } catch (error: any) {
++      toast({
++        title: "Não foi possível atualizar o plano",
++        description: error?.message || "Revise a seleção e tente novamente.",
++        variant: "destructive",
++      });
++    }
++  };
++
++  if (isLoading || !user) {
++    return (
++      <div className="min-h-screen bg-background">
++        <Header />
++        <div className="max-w-3xl mx-auto px-4 md:px-6 lg:px-8 py-12">
++          <p className="text-muted-foreground">Carregando informações do seu plano...</p>
++        </div>
++      </div>
++    );
++  }
++
++  const remainingImporter = Math.max((plan?.importerQuota ?? 0) - usage.importerUsed, 0);
++  const remainingExporter = Math.max((plan?.exporterQuota ?? 0) - usage.exporterUsed, 0);
++  const remainingNcm = Math.max((plan?.ncmQuota ?? 0) - usage.ncmUsed, 0);
++
++  return (
++    <div className="min-h-screen bg-background">
++      <Header />
++      <div className="max-w-5xl mx-auto px-4 md:px-6 lg:px-8 py-12 space-y-8">
++        <div>
++          <h1 className="text-3xl font-bold mb-2">Contrate ou ajuste seu plano</h1>
++          <p className="text-muted-foreground">
++            Defina quantos importadores, exportadores ou códigos NCM deseja consultar. Você pode pagar mensalmente
++            ou aproveitar {discountPercentage}% de desconto no plano anual.
++          </p>
++        </div>
++
++        <div className="grid gap-6 lg:grid-cols-3">
++          <Card className="lg:col-span-2">
++            <CardHeader>
++              <CardTitle>Escolha sua franquia</CardTitle>
++              <CardDescription>Use o controle deslizante para ajustar a quantidade de consultas incluídas.</CardDescription>
++            </CardHeader>
++            <CardContent className="space-y-6">
++              <div>
++                <Label className="flex justify-between text-sm font-medium">Importadores <span>{selection.importerQuota}</span></Label>
++                <Slider
++                  value={[selection.importerQuota]}
++                  min={0}
++                  max={50}
++                  step={1}
++                  onValueChange={([value]) => setSelection((prev) => ({ ...prev, importerQuota: value }))}
++                />
++                <p className="text-xs text-muted-foreground mt-1">Uso atual: {usage.importerUsed} / {plan?.importerQuota ?? 0} (restam {remainingImporter}).</p>
++              </div>
++
++              <div>
++                <Label className="flex justify-between text-sm font-medium">Exportadores <span>{selection.exporterQuota}</span></Label>
++                <Slider
++                  value={[selection.exporterQuota]}
++                  min={0}
++                  max={50}
++                  step={1}
++                  onValueChange={([value]) => setSelection((prev) => ({ ...prev, exporterQuota: value }))}
++                />
++                <p className="text-xs text-muted-foreground mt-1">Uso atual: {usage.exporterUsed} / {plan?.exporterQuota ?? 0} (restam {remainingExporter}).</p>
++              </div>
++
++              <div>
++                <Label className="flex justify-between text-sm font-medium">NCMs <span>{selection.ncmQuota}</span></Label>
++                <Slider
++                  value={[selection.ncmQuota]}
++                  min={0}
++                  max={50}
++                  step={1}
++                  onValueChange={([value]) => setSelection((prev) => ({ ...prev, ncmQuota: value }))}
++                />
++                <p className="text-xs text-muted-foreground mt-1">Uso atual: {usage.ncmUsed} / {plan?.ncmQuota ?? 0} (restam {remainingNcm}).</p>
++              </div>
++
++              <div className="space-y-3">
++                <Label className="text-sm font-medium">Forma de pagamento</Label>
++                <RadioGroup
++                  value={selection.billingCycle}
++                  onValueChange={(value) => setSelection((prev) => ({ ...prev, billingCycle: value as "monthly" | "annual" }))}
++                  className="grid grid-cols-1 sm:grid-cols-2 gap-3"
++                >
++                  <div className="flex items-center space-x-2 rounded-lg border p-3">
++                    <RadioGroupItem value="monthly" id="billing-monthly" />
++                    <Label htmlFor="billing-monthly" className="flex flex-col">
++                      <span className="font-medium">Mensal</span>
++                      <span className="text-xs text-muted-foreground">Flexibilidade para ajustar a qualquer momento.</span>
++                    </Label>
++                  </div>
++                  <div className="flex items-center space-x-2 rounded-lg border p-3">
++                    <RadioGroupItem value="annual" id="billing-annual" />
++                    <Label htmlFor="billing-annual" className="flex flex-col">
++                      <span className="font-medium">Anual</span>
++                      <span className="text-xs text-muted-foreground">Economize {discountPercentage}% pagando o ano todo.</span>
++                    </Label>
++                  </div>
++                </RadioGroup>
++              </div>
++            </CardContent>
++          </Card>
++
++          <Card>
++            <CardHeader>
++              <CardTitle>Resumo do plano</CardTitle>
++              <CardDescription>Revise o valor antes de confirmar a contratação.</CardDescription>
++            </CardHeader>
++            <CardContent className="space-y-4">
++              <div>
++                <p className="text-sm text-muted-foreground">Consultas incluídas</p>
++                <p className="text-2xl font-semibold">{totalUnits} itens</p>
++              </div>
++
++              <div>
++                <p className="text-sm text-muted-foreground">Valor mensal</p>
++                <p className="text-xl font-semibold">{formatCurrency(monthlyPrice)}</p>
++              </div>
++
++              <div>
++                <p className="text-sm text-muted-foreground">Pagamento anual com desconto</p>
++                <p className="text-xl font-semibold">{formatCurrency(annualPrice)}</p>
++              </div>
++
++              <Button className="w-full" disabled={subscribeStatus === "pending"} onClick={handleSubscribe}>
++                {selection.billingCycle === "annual" ? "Contratar plano anual" : "Contratar plano mensal"}
++              </Button>
++              <p className="text-xs text-muted-foreground text-center">
++                Você pode ajustar seu plano a qualquer momento. Novas consultas serão liberadas imediatamente.
++              </p>
++            </CardContent>
++          </Card>
++        </div>
++      </div>
++    </div>
++  );
++}
