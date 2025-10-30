@@ -1,0 +1,85 @@
+apply this patch:
+diff --git a/shared/pricing.ts b/shared/pricing.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e3dada5c648efdcb9e1952f6685f11742e6dd54a
+--- /dev/null
++++ b/shared/pricing.ts
+@@ -0,0 +1,78 @@
++export type BillingCycle = 'monthly' | 'annual';
++
++export interface PlanInput {
++  importerSlots: number;
++  exporterSlots: number;
++  ncmSlots: number;
++}
++
++export interface PlanQuote extends PlanInput {
++  totalUnits: number;
++  unitPrice: number;
++  monthlyTotal: number;
++  annualTotal: number;
++  discountPercentage: number;
++}
++
++const BASE_UNIT_PRICE = 1990;
++const TIER_DISCOUNTS: Array<{ threshold: number; price: number }> = [
++  { threshold: 1, price: 1990 },
++  { threshold: 5, price: 1890 },
++  { threshold: 10, price: 1790 },
++  { threshold: 20, price: 1690 },
++];
++
++const ANNUAL_DISCOUNT = 0.15; // 15% desconto anual
++
++function resolveUnitPrice(units: number): number {
++  if (units <= 0) {
++    return BASE_UNIT_PRICE;
++  }
++
++  let price = BASE_UNIT_PRICE;
++  for (const tier of TIER_DISCOUNTS) {
++    if (units >= tier.threshold) {
++      price = tier.price;
++    } else {
++      break;
++    }
++  }
++
++  return price;
++}
++
++export function calculatePlanQuote(input: PlanInput): PlanQuote {
++  const importerSlots = Math.max(0, Math.floor(input.importerSlots));
++  const exporterSlots = Math.max(0, Math.floor(input.exporterSlots));
++  const ncmSlots = Math.max(0, Math.floor(input.ncmSlots));
++
++  const totalUnits = importerSlots + exporterSlots + ncmSlots;
++
++  if (totalUnits === 0) {
++    return {
++      importerSlots,
++      exporterSlots,
++      ncmSlots,
++      totalUnits,
++      unitPrice: BASE_UNIT_PRICE,
++      monthlyTotal: 0,
++      annualTotal: 0,
++      discountPercentage: ANNUAL_DISCOUNT * 100,
++    };
++  }
++
++  const unitPrice = resolveUnitPrice(totalUnits);
++  const monthlyTotal = unitPrice * totalUnits;
++  const annualTotal = Math.round(monthlyTotal * 12 * (1 - ANNUAL_DISCOUNT));
++
++  return {
++    importerSlots,
++    exporterSlots,
++    ncmSlots,
++    totalUnits,
++    unitPrice,
++    monthlyTotal,
++    annualTotal,
++    discountPercentage: ANNUAL_DISCOUNT * 100,
++  };
++}
