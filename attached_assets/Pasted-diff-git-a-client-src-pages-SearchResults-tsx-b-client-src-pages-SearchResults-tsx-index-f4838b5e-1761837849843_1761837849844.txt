@@ -1,0 +1,190 @@
+diff --git a/client/src/pages/SearchResults.tsx b/client/src/pages/SearchResults.tsx
+index f4838b5e9f956ea40b88d4d7ccb3166af465b4eb..11116bbb28574ba7f434912c95ee99cc8ff3f579 100644
+--- a/client/src/pages/SearchResults.tsx
++++ b/client/src/pages/SearchResults.tsx
+@@ -1,139 +1,160 @@
+ import { useEffect, useMemo } from "react";
+ import { Header } from "@/components/Header";
+ import { CompanyCard } from "@/components/CompanyCard";
+ import { NcmCard } from "@/components/NcmCard";
+ import { Card } from "@/components/ui/card";
++import { Button } from "@/components/ui/button";
+ import { useLocation } from "wouter";
+ import { useQuery } from "@tanstack/react-query";
+ import { useToast } from "@/hooks/use-toast";
+ import { useAuth } from "@/hooks/useAuth";
+ 
+ interface Company {
+   id: number;
+   name: string;
+   kind: 'importer' | 'exporter';
+   countryCode: string;
+ }
+ 
+ interface CompanySearchResponse {
+   results: Array<{ company: Company; score: number; allowed: boolean; reason?: string; remainingSlots: number }>;
+ }
+ 
+ interface NcmSearchResponse {
+   results: Array<{ code: string; description: string | null; totalShipments: number; allowed: boolean; reason?: string; remainingSlots: number }>;
+ }
+ 
+ export default function SearchResults() {
+   const [currentLocation, setLocation] = useLocation();
+   const { toast } = useToast();
+   const { user, isLoading } = useAuth();
++  const isGuest = !user;
+   const query = useMemo(() => {
+     const searchIndex = currentLocation.indexOf('?');
+     const search = searchIndex >= 0 ? currentLocation.slice(searchIndex) : window.location.search;
+     return new URLSearchParams(search).get('q') || '';
+   }, [currentLocation]);
+ 
+-  useEffect(() => {
+-    if (!isLoading && !user) {
+-      setLocation(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+-    }
+-  }, [user, isLoading, setLocation]);
+-
+   const companiesQuery = useQuery<CompanySearchResponse>({
+     queryKey: [`/api/companies/search?q=${encodeURIComponent(query)}`],
+-    enabled: !!query && !!user,
++    enabled: !!query,
+   });
+ 
+   const ncmQuery = useQuery<NcmSearchResponse>({
+     queryKey: [`/api/ncm/search?q=${encodeURIComponent(query)}`],
+-    enabled: !!query && !!user,
++    enabled: !!query,
+   });
+ 
+   const companies = companiesQuery.data?.results ?? [];
+   const ncms = ncmQuery.data?.results ?? [];
+ 
+   const isFetching = companiesQuery.isLoading || ncmQuery.isLoading;
+   const hasResults = companies.length > 0 || ncms.length > 0;
++  const normalizedQuery = query.trim();
++  const shouldShowGuestUpsell = isGuest && normalizedQuery.length > 0 && !isFetching && !hasResults;
+ 
+   const handleCompanyClick = (result: CompanySearchResponse["results"][number]) => {
+     if (!result.allowed) {
+-      toast({
+-        title: "Plano insuficiente",
+-        description: result.reason || "Amplie sua franquia em planos para consultar este registro.",
+-        variant: "destructive",
+-      });
++      if (isGuest) {
++        setLocation("/planos");
++      } else {
++        toast({
++          title: "Plano insuficiente",
++          description: result.reason || "Amplie sua franquia em planos para consultar este registro.",
++          variant: "destructive",
++        });
++      }
+       return;
+     }
+     setLocation(`/company/${result.company.id}`);
+   };
+ 
+   const handleNcmClick = (result: NcmSearchResponse["results"][number]) => {
+     if (!result.allowed) {
+-      toast({
+-        title: "Plano insuficiente",
+-        description: result.reason || "Amplie sua franquia em planos para consultar este NCM.",
+-        variant: "destructive",
+-      });
++      if (isGuest) {
++        setLocation("/planos");
++      } else {
++        toast({
++          title: "Plano insuficiente",
++          description: result.reason || "Amplie sua franquia em planos para consultar este NCM.",
++          variant: "destructive",
++        });
++      }
+       return;
+     }
+     setLocation(`/ncm/${encodeURIComponent(result.code)}`);
+   };
+ 
+-  useEffect(() => {
+-    if (companiesQuery.error instanceof Error && companiesQuery.error.message.startsWith("401")) {
+-      setLocation(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+-    }
+-  }, [companiesQuery.error, setLocation]);
+-
+-  if (isLoading || !user) {
++  if (isLoading) {
+     return (
+       <div className="min-h-screen bg-background">
+         <Header compact onSearch={(q) => setLocation(`/search?q=${encodeURIComponent(q)}`)} />
+         <div className="max-w-4xl mx-auto px-4 md:px-6 lg:px-8 py-12">
+           <p className="text-muted-foreground">Carregando resultados da busca...</p>
+         </div>
+       </div>
+     );
+   }
+ 
+   return (
+     <div className="min-h-screen bg-background">
+       <Header compact onSearch={(q) => setLocation(`/search?q=${encodeURIComponent(q)}`)} />
+ 
+       <div className="max-w-4xl mx-auto px-4 md:px-6 lg:px-8 py-12 space-y-10">
+         <div className="space-y-2">
+           <h1 className="text-3xl font-bold" data-testid="text-search-results-title">
+             Resultados da Busca
+           </h1>
+           <p className="text-muted-foreground" data-testid="text-results-count">
+             {isFetching ? 'Buscando...' : `Consultas encontradas para "${query}"`}
+           </p>
+         </div>
+ 
+         {isFetching ? (
+           <div className="text-center py-12 text-muted-foreground">Carregando resultados...</div>
++        ) : shouldShowGuestUpsell ? (
++          <Card className="p-8 space-y-4 text-center">
++            <h2 className="text-2xl font-semibold">Amplie seu acesso</h2>
++            <p className="text-muted-foreground">
++              Os dados completos para "{normalizedQuery}" fazem parte do acervo premium da plataforma. Contrate um plano ou faça
++              login caso já seja cliente para liberar todas as consultas.
++            </p>
++            <div className="flex flex-col sm:flex-row justify-center gap-3">
++              <Button onClick={() => setLocation("/planos")}>Conheça os planos</Button>
++              <Button
++                variant="outline"
++                onClick={() =>
++                  setLocation(
++                    `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`,
++                  )
++                }
++              >
++                Já sou cliente
++              </Button>
++            </div>
++          </Card>
+         ) : !hasResults ? (
+           <Card className="p-8 text-center text-muted-foreground">
+             Nenhum importador, exportador ou NCM foi localizado para "{query}". Ajuste seu termo ou entre em contato
+             com nossa equipe para ampliar a base de dados.
+           </Card>
+         ) : (
+           <div className="space-y-8">
+             {companies.length > 0 && (
+               <section className="space-y-4">
+                 <h2 className="text-xl font-semibold">Importadores e Exportadores</h2>
+                 <div className="space-y-3">
+                   {companies.map((result) => (
+                     <CompanyCard
+                       key={result.company.id}
+                       {...result.company}
+                       score={result.score}
+                       allowed={result.allowed}
+                       lockReason={result.reason}
+                       onClick={() => handleCompanyClick(result)}
+                     />
+                   ))}
+                 </div>
+               </section>
+             )}
+ 

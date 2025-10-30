@@ -5,6 +5,7 @@ import { Header } from "@/components/Header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { Button } from "@/components/ui/button";
 
 interface NcmSummary {
   code: string;
@@ -23,25 +24,17 @@ export default function NcmProfile() {
   const code = params?.code || "";
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { user, isLoading } = useAuth();
-
-  useEffect(() => {
-    if (!isLoading && !user) {
-      setLocation(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-    }
-  }, [user, isLoading, setLocation]);
+  const { isLoading } = useAuth();
 
   const ncmQuery = useQuery<NcmSummary>({
     queryKey: [`/api/ncm/${code}`],
-    enabled: !!code && !!user,
+    enabled: !!code,
   });
 
   useEffect(() => {
     if (ncmQuery.error) {
       const message = ncmQuery.error instanceof Error ? ncmQuery.error.message : "";
-      if (message.startsWith("401")) {
-        setLocation(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-      } else if (message.startsWith("403")) {
+      if (message.startsWith("403")) {
         toast({
           title: "Plano insuficiente",
           description: "Você atingiu o limite contratado para consultar este NCM. Ajuste sua franquia em planos.",
@@ -49,7 +42,7 @@ export default function NcmProfile() {
         });
       }
     }
-  }, [ncmQuery.error, setLocation, toast]);
+  }, [ncmQuery.error, toast]);
 
   const statusMessage = ncmQuery.error instanceof Error ? ncmQuery.error.message : "";
   const hasPlanRestriction = statusMessage.startsWith("403");
@@ -73,6 +66,31 @@ export default function NcmProfile() {
             </CardHeader>
             <CardContent>
               <p className="text-muted-foreground">Buscando informações do NCM selecionado.</p>
+            </CardContent>
+          </Card>
+        ) : statusMessage.startsWith("401") ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Disponível para clientes</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 text-muted-foreground">
+              <p>
+                Os indicadores detalhados do NCM "{code}" estão disponíveis apenas para clientes. Contrate um plano ou faça
+                login para prosseguir.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button onClick={() => setLocation("/planos")}>Ver planos</Button>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    setLocation(
+                      `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`,
+                    )
+                  }
+                >
+                  Já sou cliente
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ) : hasPlanRestriction ? (
