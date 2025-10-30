@@ -8,6 +8,12 @@ import { upload } from "./upload";
 import { enqueueJob } from "./etl";
 import { hashPassword, verifyPassword } from "./auth";
 import { calculatePlanQuote } from "@shared/pricing";
+import {
+  getSampleCompanyById,
+  getSampleNcmByCode,
+  searchSampleCompanies,
+  searchSampleNcms,
+} from "@shared/sample-data";
 
 declare module "express-session" {
   interface SessionData {
@@ -403,13 +409,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/companies/search", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-    const context = auth.context;
-
     try {
       const query = String(req.query.q || "");
       const limit = parseInt(String(req.query.limit || "10"), 10);
+
+      if (!req.session?.userId) {
+        const sampleResults = searchSampleCompanies(query, Number.isNaN(limit) ? 10 : limit).map((company) => ({
+          company: {
+            id: company.id,
+            name: company.name,
+            kind: company.kind,
+            countryCode: company.countryCode,
+          },
+          score: company.score,
+          allowed: true,
+          reason: undefined,
+          remainingSlots: 0,
+        }));
+
+        return res.json({
+          results: sampleResults,
+          summary: {
+            plan: null,
+            usage: { importer: 0, exporter: 0, ncm: 0 },
+            remaining: { importer: 0, exporter: 0 },
+          },
+          mode: "guest",
+        });
+      }
+
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+      const context = auth.context;
 
       if (!query.trim()) {
         return res.json({
@@ -465,13 +496,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/companies/:id", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     const companyId = Number.parseInt(req.params.id, 10);
     if (Number.isNaN(companyId)) {
       return res.status(400).json({ message: "Identificador inválido." });
     }
+
+    if (!req.session?.userId) {
+      const sample = getSampleCompanyById(companyId);
+      if (!sample) {
+        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
+      }
+
+      return res.json({
+        id: sample.id,
+        name: sample.name,
+        kind: sample.kind,
+        countryCode: sample.countryCode,
+      });
+    }
+
+    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+    if (!auth || !auth.context) return;
 
     try {
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
@@ -486,13 +531,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/companies/:id/stats", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     const companyId = Number.parseInt(req.params.id, 10);
     if (Number.isNaN(companyId)) {
       return res.status(400).json({ message: "Identificador inválido." });
     }
+
+    if (!req.session?.userId) {
+      const sample = getSampleCompanyById(companyId);
+      if (!sample) {
+        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
+      }
+
+      return res.json(sample.metrics);
+    }
+
+    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+    if (!auth || !auth.context) return;
 
     try {
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
@@ -508,13 +562,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/companies/:id/shipments-over-time", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     const companyId = Number.parseInt(req.params.id, 10);
     if (Number.isNaN(companyId)) {
       return res.status(400).json({ message: "Identificador inválido." });
     }
+
+    if (!req.session?.userId) {
+      const sample = getSampleCompanyById(companyId);
+      if (!sample) {
+        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
+      }
+
+      return res.json(sample.shipmentsOverTime);
+    }
+
+    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+    if (!auth || !auth.context) return;
 
     try {
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
@@ -530,13 +593,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/companies/:id/top-partners", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     const companyId = Number.parseInt(req.params.id, 10);
     if (Number.isNaN(companyId)) {
       return res.status(400).json({ message: "Identificador inválido." });
     }
+
+    const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
+
+    if (!req.session?.userId) {
+      const sample = getSampleCompanyById(companyId);
+      if (!sample) {
+        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
+      }
+
+      return res.json(sample.topPartners.slice(0, Number.isNaN(limit) ? 5 : limit));
+    }
+
+    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+    if (!auth || !auth.context) return;
 
     try {
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
@@ -544,7 +618,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(access.error.status).json({ message: access.error.message });
       }
 
-      const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
       const data = await storage.getTopPartners(companyId, Number.isNaN(limit) ? 5 : limit);
       res.json(data);
     } catch (error: any) {
@@ -553,13 +626,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/companies/:id/top-origin-countries", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     const companyId = Number.parseInt(req.params.id, 10);
     if (Number.isNaN(companyId)) {
       return res.status(400).json({ message: "Identificador inválido." });
     }
+
+    const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
+
+    if (!req.session?.userId) {
+      const sample = getSampleCompanyById(companyId);
+      if (!sample) {
+        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
+      }
+
+      return res.json(sample.topOriginCountries.slice(0, Number.isNaN(limit) ? 5 : limit));
+    }
+
+    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+    if (!auth || !auth.context) return;
 
     try {
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
@@ -567,7 +651,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(access.error.status).json({ message: access.error.message });
       }
 
-      const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
       const data = await storage.getTopOriginCountries(companyId, Number.isNaN(limit) ? 5 : limit);
       res.json(data);
     } catch (error: any) {
@@ -576,13 +659,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/companies/:id/top-destination-ports", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     const companyId = Number.parseInt(req.params.id, 10);
     if (Number.isNaN(companyId)) {
       return res.status(400).json({ message: "Identificador inválido." });
     }
+
+    const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
+
+    if (!req.session?.userId) {
+      const sample = getSampleCompanyById(companyId);
+      if (!sample) {
+        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
+      }
+
+      return res.json(sample.topDestinationPorts.slice(0, Number.isNaN(limit) ? 5 : limit));
+    }
+
+    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+    if (!auth || !auth.context) return;
 
     try {
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
@@ -590,7 +684,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(access.error.status).json({ message: access.error.message });
       }
 
-      const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
       const data = await storage.getTopDestinationPorts(companyId, Number.isNaN(limit) ? 5 : limit);
       res.json(data);
     } catch (error: any) {
@@ -599,13 +692,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/companies/:id/top-hs-codes", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     const companyId = Number.parseInt(req.params.id, 10);
     if (Number.isNaN(companyId)) {
       return res.status(400).json({ message: "Identificador inválido." });
     }
+
+    const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
+
+    if (!req.session?.userId) {
+      const sample = getSampleCompanyById(companyId);
+      if (!sample) {
+        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
+      }
+
+      return res.json(sample.topHSCodes.slice(0, Number.isNaN(limit) ? 5 : limit));
+    }
+
+    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+    if (!auth || !auth.context) return;
 
     try {
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
@@ -613,7 +717,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(access.error.status).json({ message: access.error.message });
       }
 
-      const limit = Number.parseInt(String(req.query.limit ?? "5"), 10);
       const data = await storage.getTopHSCodes(companyId, Number.isNaN(limit) ? 5 : limit);
       res.json(data);
     } catch (error: any) {
@@ -622,22 +725,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/companies/:id/shipments", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     const companyId = Number.parseInt(req.params.id, 10);
     if (Number.isNaN(companyId)) {
       return res.status(400).json({ message: "Identificador inválido." });
     }
+
+    const limit = Number.parseInt(String(req.query.limit ?? "10"), 10);
+    const offset = Number.parseInt(String(req.query.offset ?? "0"), 10);
+
+    if (!req.session?.userId) {
+      const sample = getSampleCompanyById(companyId);
+      if (!sample) {
+        return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
+      }
+
+      const shipments = sample.shipments.slice(Number.isNaN(offset) ? 0 : offset, Number.isNaN(offset) ? 0 : offset + (Number.isNaN(limit) ? 10 : limit));
+
+      return res.json({
+        shipments,
+        total: sample.shipments.length,
+      });
+    }
+
+    const auth = await ensureAuthenticated(req, res, { loadContext: true });
+    if (!auth || !auth.context) return;
 
     try {
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
       if (access.error) {
         return res.status(access.error.status).json({ message: access.error.message });
       }
-
-      const limit = Number.parseInt(String(req.query.limit ?? "10"), 10);
-      const offset = Number.parseInt(String(req.query.offset ?? "0"), 10);
 
       const result = await storage.getShipmentsByCompanyId(
         companyId,
@@ -651,13 +768,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/ncm/search", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-    const context = auth.context;
-
     try {
       const query = String(req.query.q || "").trim();
       const limit = Number.parseInt(String(req.query.limit ?? "10"), 10);
+
+      if (!req.session?.userId) {
+        const sampleResults = searchSampleNcms(query, Number.isNaN(limit) ? 10 : limit).map((ncm) => ({
+          code: ncm.code,
+          description: ncm.description,
+          totalShipments: ncm.totalShipments,
+          allowed: true,
+          reason: undefined,
+          remainingSlots: 0,
+        }));
+
+        return res.json({
+          results: sampleResults,
+          summary: {
+            plan: null,
+            usage: { importer: 0, exporter: 0, ncm: 0 },
+            remaining: { ncm: 0 },
+          },
+          mode: "guest",
+        });
+      }
+
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+      const context = auth.context;
 
       if (!query) {
         return res.json({
@@ -710,11 +848,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/ncm/:code", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     try {
       const code = String(req.params.code || "");
+
+      if (!req.session?.userId) {
+        const sample = getSampleNcmByCode(code);
+        if (!sample) {
+          return res.status(401).json({ message: AUTH_REQUIRED_MESSAGE });
+        }
+
+        return res.json({
+          code: sample.code,
+          description: sample.description,
+          totalShipments: sample.totalShipments,
+          totalWeightKg: sample.totalWeightKg,
+          totalTeus: sample.totalTeus,
+        });
+      }
+
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+
       const summary = await storage.getNcmSummary(code);
 
       if (!summary) {
