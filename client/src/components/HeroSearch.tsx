@@ -20,22 +20,27 @@ export function HeroSearch({ onSearch }: HeroSearchProps) {
   };
 
   return (
-    <div className="py-20 md:py-32 px-4">
-      <div className="max-w-4xl mx-auto text-center space-y-8">
+    <section className="relative overflow-hidden py-20 md:py-32 px-4">
+      <div className="absolute inset-0 bg-gradient-to-b from-sky-50 via-white to-white" aria-hidden="true" />
+      <div className="relative max-w-4xl mx-auto text-center space-y-10">
         <div className="space-y-4">
           <div className="flex justify-center mb-6">
-            <img 
-              src={logoImage} 
-              alt="Trade Radar Logo" 
-              className="w-48 h-48 object-contain"
+            <img
+              src={logoImage}
+              alt="Trade Radar Logo"
+              className="w-40 h-40 md:w-48 md:h-48 object-contain drop-shadow-sm"
               data-testid="img-logo"
             />
           </div>
-          <h1 className="text-3xl md:text-5xl font-bold" data-testid="text-hero-title">
+          <h1 className="text-3xl md:text-5xl font-bold tracking-tight" data-testid="text-hero-title">
             Encontre Qualquer Importador ou Exportador
           </h1>
-          <p className="text-lg text-muted-foreground" data-testid="text-hero-subtitle">
-            Busque dados de comércio marítimo instantaneamente
+          <p className="text-base md:text-lg text-muted-foreground leading-relaxed" data-testid="text-hero-subtitle">
+            Pesquise <span className="text-cyan-600 font-semibold">milhões de registros de comércio exterior</span> em
+            segundos com dados confiáveis em português.
+          </p>
+          <p className="text-sm md:text-base text-muted-foreground/80">
+            Explore exemplos gratuitos imediatamente ou faça login para desbloquear o acesso completo.
           </p>
         </div>
 
@@ -44,15 +49,15 @@ export function HeroSearch({ onSearch }: HeroSearchProps) {
             <Input
               type="search"
               placeholder="Busque por qualquer importador, exportador ou NCM..."
-              className="h-14 text-base pr-14 rounded-full border-2"
+              className="h-14 text-base pr-14 rounded-full border-2 border-cyan-100 shadow-sm"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               data-testid="input-hero-search"
             />
-            <Button 
-              type="submit" 
-              size="icon" 
-              className="absolute right-1 top-1 h-12 w-12 rounded-full bg-cyan-500 hover:bg-cyan-600" 
+            <Button
+              type="submit"
+              size="icon"
+              className="absolute right-1 top-1 h-12 w-12 rounded-full bg-cyan-500 hover:bg-cyan-600"
               data-testid="button-hero-search"
             >
               <Search className="h-5 w-5" />
@@ -60,10 +65,13 @@ export function HeroSearch({ onSearch }: HeroSearchProps) {
           </div>
         </form>
 
-        <Button variant="ghost" size="sm" data-testid="button-random-company">
-          Experimente uma empresa aleatória
-        </Button>
+        <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
+          <Button variant="outline" size="sm" className="rounded-full px-6" data-testid="button-random-company">
+            Experimente uma empresa aleatória
+          </Button>
+          <span className="text-xs md:text-sm">Sem necessidade de login para pesquisar exemplos reais.</span>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
