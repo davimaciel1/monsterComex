@@ -1,4 +1,5 @@
-import { pgTable, text, integer, serial, timestamp, boolean, numeric, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { pgTable, text, integer, serial, timestamp, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -10,9 +11,10 @@ export const companies = pgTable("companies", {
   countryCode: text("country_code").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
-  nameIdx: index("companies_name_idx").on(table.name),
   kindIdx: index("companies_kind_idx").on(table.kind),
   countryIdx: index("companies_country_idx").on(table.countryCode),
+  nameKindUniqueIdx: uniqueIndex("companies_name_kind_unique_idx").on(table.name, table.kind),
+  nameTrgmIdx: index("companies_name_trgm_idx").using("gin", sql`${table.name} gin_trgm_ops`),
 }));
 
 export const insertCompanySchema = createInsertSchema(companies).omit({
