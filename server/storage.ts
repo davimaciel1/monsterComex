@@ -37,6 +37,12 @@ export interface IStorage {
   // Error log operations
   createErrorLog(errorLog: InsertErrorLog): Promise<ErrorLog>;
   getErrorLogsByIngestionId(ingestionId: number): Promise<ErrorLog[]>;
+  createErrorLogsBatch(errorLogs: InsertErrorLog[]): Promise<void>;
+  
+  // Batch operations
+  upsertCompaniesBatch(companies: InsertCompany[], tx?: any): Promise<Map<string, Company>>;
+  createShipmentsBatch(shipments: InsertShipment[], tx?: any): Promise<void>;
+  withTransaction<T>(callback: (tx: any) => Promise<T>): Promise<T>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -452,6 +458,91 @@ export class DatabaseStorage implements IStorage {
       .where(eq(errorLogs.ingestionId, ingestionId))
       .orderBy(errorLogs.rowNumber);
   }
+  
+  async createErrorLogsBatch(errorLogs: InsertErrorLog[]): Promise<void> {
+    if (!errorLogs.length) return;
+    const { errorLogs: errorLogsTable } = await import("@shared/schema");
+    
+    await this.db
+      .insert(errorLogsTable)
+      .values(errorLogs);
+  }
+  
+  async withTransaction<T>(callback: (tx: any) => Promise<T>): Promise<T> {
+    return await this.db.transaction(callback);
+  }
+  
+  async upsertCompaniesBatch(companies: InsertCompany[], tx?: any): Promise<Map<string, Company>> {
+    const db = tx ?? this.db;
+    const { companies: companiesTable } = await import("@shared/schema");
+    const { eq, and } = await import("drizzle-orm");
+    
+    const companyMap = new Map<string, Company>();
+    
+    if (!companies.length) return companyMap;
+    
+    const uniqueCompanies = new Map<string, InsertCompany>();
+    for (const company of companies) {
+      const key = buildCompanyKey(company.name, company.kind);
+      if (!uniqueCompanies.has(key)) {
+        uniqueCompanies.set(key, company);
+      }
+    }
+    
+    for (const [key, company] of Array.from(uniqueCompanies.entries())) {
+      const existing = await db
+        .select()
+        .from(companiesTable)
+        .where(and(
+          eq(companiesTable.name, company.name),
+          eq(companiesTable.kind, company.kind)
+        ))
+        .limit(1);
+      
+      if (existing[0]) {
+        companyMap.set(key, existing[0]);
+      } else {
+        const result = await db
+          .insert(companiesTable)
+          .values(company)
+          .onConflictDoNothing()
+          .returning();
+        
+        if (result[0]) {
+          companyMap.set(key, result[0]);
+        } else {
+          const retry = await db
+            .select()
+            .from(companiesTable)
+            .where(and(
+              eq(companiesTable.name, company.name),
+              eq(companiesTable.kind, company.kind)
+            ))
+            .limit(1);
+          
+          if (retry[0]) {
+            companyMap.set(key, retry[0]);
+          }
+        }
+      }
+    }
+    
+    return companyMap;
+  }
+  
+  async createShipmentsBatch(shipments: InsertShipment[], tx?: any): Promise<void> {
+    if (!shipments.length) return;
+    const db = tx ?? this.db;
+    const { shipments: shipmentsTable } = await import("@shared/schema");
+    
+    await db
+      .insert(shipmentsTable)
+      .values(shipments);
+  }
+}
+
+export function buildCompanyKey(name: string, kind: string): string {
+  return `${name}::${kind}`;
 }
 
 export const storage = new DatabaseStorage(db);

@@ -1,7 +1,8 @@
 import XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
-import { storage } from "./storage";
+import type { InsertCompany, InsertShipment, InsertErrorLog } from "@shared/schema";
+import { storage, buildCompanyKey } from "./storage";
 
 interface ShipmentRow {
   company_name?: string;
@@ -78,6 +79,10 @@ const HEADER_MAPPINGS: Record<string, CanonicalShipmentField> = {
   pesobruto: "weight_kg",
 };
 
+const BATCH_SIZE = 500;
+
+type TradeRole = 'importer' | 'exporter';
+
 const COMPANY_KIND_MAPPINGS: Record<string, "importer" | "exporter"> = {
   importer: "importer",
   importador: "importer",
@@ -118,7 +123,6 @@ function normalizeShipmentRow(row: ShipmentRow): ShipmentRow {
       typeof value === "string" ? value.trim() : value;
   }
 
-  // Infer company_kind if not present: if we have company_name, assume exporter
   if (!normalizedRow.company_kind && normalizedRow.company_name) {
     normalizedRow.company_kind = "exporter";
   }
@@ -138,13 +142,11 @@ function normalizeShipmentRows(rows: ShipmentRow[]): ShipmentRow[] {
 
 export async function processShipmentFile(filePath: string, ingestionId: number): Promise<void> {
   try {
-    // Update ingestion status to processing
     await storage.updateIngestion(ingestionId, {
       status: 'processing',
       startedAt: new Date(),
     });
 
-    // Read the file based on extension
     const ext = path.extname(filePath).toLowerCase();
     let rows: ShipmentRow[] = [];
 
@@ -158,32 +160,17 @@ export async function processShipmentFile(filePath: string, ingestionId: number)
 
     rows = normalizeShipmentRows(rows);
 
-    // Process each row
     let rowsOk = 0;
     let rowsFailed = 0;
     const totalRows = rows.length;
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const rowNumber = i + 1;
-
-      try {
-        await processShipmentRow(row, ingestionId);
-        rowsOk++;
-      } catch (error: any) {
-        rowsFailed++;
-        
-        // Log the error
-        await storage.createErrorLog({
-          ingestionId,
-          rowNumber,
-          errorMessage: error.message,
-          rowData: JSON.stringify(row),
-        });
-      }
+    for (let start = 0; start < rows.length; start += BATCH_SIZE) {
+      const batch = rows.slice(start, start + BATCH_SIZE);
+      const { ok, failed } = await processShipmentBatch(batch, ingestionId, start);
+      rowsOk += ok;
+      rowsFailed += failed;
     }
 
-    // Update ingestion as done
     await storage.updateIngestion(ingestionId, {
       status: 'done',
       completedAt: new Date(),
@@ -192,18 +179,15 @@ export async function processShipmentFile(filePath: string, ingestionId: number)
       rowsFailed,
     });
 
-    // Delete the uploaded file
     fs.unlinkSync(filePath);
 
   } catch (error: any) {
-    // Update ingestion as failed
     await storage.updateIngestion(ingestionId, {
       status: 'failed',
       completedAt: new Date(),
       errorMessage: error.message,
     });
 
-    // Try to delete the file even if processing failed
     try {
       fs.unlinkSync(filePath);
     } catch {}
@@ -215,7 +199,6 @@ async function readExcelFile(filePath: string): Promise<ShipmentRow[]> {
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
   
-  // Convert to JSON with header row
   const data = XLSX.utils.sheet_to_json<ShipmentRow>(worksheet, {
     raw: false,
     defval: undefined,
@@ -237,70 +220,245 @@ async function readCSVFile(filePath: string): Promise<ShipmentRow[]> {
   return data;
 }
 
-async function processShipmentRow(row: ShipmentRow, ingestionId: number): Promise<void> {
-  // Validate required fields
-  const companyKind = normalizeCompanyKind(row.company_kind);
+type ShipmentInsertBase = Omit<InsertShipment, "companyId" | "partnerId">;
 
-  if (!row.company_name || !companyKind) {
+interface PreparedShipmentEntry {
+  rowNumber: number;
+  originalRow: ShipmentRow;
+  company: InsertCompany;
+  partner?: InsertCompany;
+  companyKey: string;
+  partnerKey?: string;
+  shipment: ShipmentInsertBase;
+}
+
+async function processShipmentBatch(
+  batch: ShipmentRow[],
+  ingestionId: number,
+  startIndex: number,
+): Promise<{ ok: number; failed: number }> {
+  let ok = 0;
+  let failed = 0;
+
+  const validationErrors: InsertErrorLog[] = [];
+  const processingErrors: InsertErrorLog[] = [];
+  const loggedRows = new Set<number>();
+  const preparedEntries: PreparedShipmentEntry[] = [];
+
+  for (let idx = 0; idx < batch.length; idx++) {
+    const row = batch[idx];
+    const rowNumber = startIndex + idx + 1;
+
+    try {
+      const prepared = prepareShipmentEntry(row, rowNumber, ingestionId);
+      preparedEntries.push(prepared);
+    } catch (error) {
+      failed++;
+      const message = error instanceof Error ? error.message : 'Erro ao validar linha';
+      validationErrors.push(createErrorLogEntry(ingestionId, rowNumber, message, row));
+      loggedRows.add(rowNumber);
+    }
+  }
+
+  if (preparedEntries.length === 0) {
+    if (validationErrors.length) {
+      await storage.createErrorLogsBatch(validationErrors);
+    }
+    return { ok, failed };
+  }
+
+  try {
+    const insertedCount = await storage.withTransaction(async (tx) => {
+      const companyInputs: InsertCompany[] = [];
+      for (const entry of preparedEntries) {
+        companyInputs.push(entry.company);
+        if (entry.partner) {
+          companyInputs.push(entry.partner);
+        }
+      }
+
+      const companyMap = await storage.upsertCompaniesBatch(companyInputs, tx);
+
+      const shipmentsToInsert: InsertShipment[] = [];
+
+      for (const entry of preparedEntries) {
+        const company = companyMap.get(entry.companyKey);
+        if (!company) {
+          processingErrors.push(createErrorLogEntry(
+            ingestionId,
+            entry.rowNumber,
+            'Empresa não encontrada após upsert',
+            entry.originalRow,
+          ));
+          loggedRows.add(entry.rowNumber);
+          failed++;
+          continue;
+        }
+
+        let partnerId: number | undefined;
+        if (entry.partner && entry.partnerKey) {
+          const partner = companyMap.get(entry.partnerKey);
+          if (!partner) {
+            processingErrors.push(createErrorLogEntry(
+              ingestionId,
+              entry.rowNumber,
+              'Parceiro não encontrado após upsert',
+              entry.originalRow,
+            ));
+            loggedRows.add(entry.rowNumber);
+            failed++;
+            continue;
+          }
+          partnerId = partner.id;
+        }
+
+        shipmentsToInsert.push({
+          ...entry.shipment,
+          companyId: company.id,
+          partnerId,
+        });
+      }
+
+      if (!shipmentsToInsert.length) {
+        return 0;
+      }
+
+      await storage.createShipmentsBatch(shipmentsToInsert, tx);
+      return shipmentsToInsert.length;
+    });
+
+    ok += insertedCount;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro desconhecido ao salvar lote';
+    for (const entry of preparedEntries) {
+      if (loggedRows.has(entry.rowNumber)) continue;
+      processingErrors.push(createErrorLogEntry(
+        ingestionId,
+        entry.rowNumber,
+        `Erro ao salvar lote: ${message}`,
+        entry.originalRow,
+      ));
+      loggedRows.add(entry.rowNumber);
+      failed++;
+    }
+  }
+
+  const allErrors = [...validationErrors, ...processingErrors];
+  if (allErrors.length) {
+    await storage.createErrorLogsBatch(allErrors);
+  }
+
+  return { ok, failed };
+}
+
+function prepareShipmentEntry(row: ShipmentRow, rowNumber: number, ingestionId: number): PreparedShipmentEntry {
+  const companyKind = normalizeCompanyKind(row.company_kind);
+  const companyName = sanitizeString(row.company_name);
+
+  if (!companyName || !companyKind) {
     throw new Error('Campos obrigatórios faltando: company_name, company_kind');
   }
 
-  if (!['importer', 'exporter'].includes(companyKind)) {
+  const normalizedKind = companyKind.toLowerCase() as TradeRole;
+  if (normalizedKind !== 'importer' && normalizedKind !== 'exporter') {
     throw new Error('company_kind deve ser "importer" ou "exporter"');
   }
 
-  // Get or create company
-  const company = await storage.getOrCreateCompany(
-    row.company_name.trim(),
-    companyKind as 'importer' | 'exporter',
-    row.company_country?.trim() || 'Unknown'
-  );
+  const company: InsertCompany = {
+    name: companyName,
+    kind: normalizedKind,
+    countryCode: sanitizeString(row.company_country) ?? 'Unknown',
+  };
 
-  // Get or create partner company (if provided)
-  let partnerId: number | undefined = undefined;
-  if (row.partner_name) {
-    const partnerKind = company.kind === 'importer' ? 'exporter' : 'importer';
-    const partner = await storage.getOrCreateCompany(
-      row.partner_name.trim(),
-      partnerKind,
-      row.partner_country?.trim() || 'Unknown'
-    );
-    partnerId = partner.id;
+  let partner: InsertCompany | undefined;
+  let partnerKey: string | undefined;
+  const partnerName = sanitizeString(row.partner_name);
+  if (partnerName) {
+    const partnerKind: TradeRole = normalizedKind === 'importer' ? 'exporter' : 'importer';
+    partner = {
+      name: partnerName,
+      kind: partnerKind,
+      countryCode: sanitizeString(row.partner_country) ?? 'Unknown',
+    };
+    partnerKey = buildCompanyKey(partner.name, partner.kind);
   }
 
-  // Parse dates
   const ets = row.ets ? parseDate(row.ets) : undefined;
   const eta = row.eta ? parseDate(row.eta) : undefined;
+  const teus = parseIntegerValue(row.teus);
+  const weightKg = parseNumericAsString(row.weight_kg);
 
-  // Parse numeric fields
-  const teus = row.teus ? parseInt(String(row.teus)) : undefined;
-  const weightKg = row.weight_kg ? parseFloat(String(row.weight_kg)) : undefined;
-
-  // Create shipment
-  await storage.createShipment({
-    companyId: company.id,
-    shipmentNo: row.shipment_no?.trim() || `SH-${Date.now()}-${Math.random()}`,
+  const shipment: ShipmentInsertBase = {
+    shipmentNo: sanitizeString(row.shipment_no) ?? generateFallbackShipmentNo(ingestionId, rowNumber),
     ets,
     eta,
-    partnerId,
-    originCountry: row.origin_country?.trim(),
-    originPort: row.origin_port?.trim(),
-    destinationCountry: row.destination_country?.trim(),
-    destinationPort: row.destination_port?.trim(),
-    hsCode: row.hs_code?.trim(),
-    hsDescription: row.hs_description?.trim(),
-    teus: teus && !isNaN(teus) ? teus : undefined,
-    weightKg: weightKg && !isNaN(weightKg) ? String(weightKg) : undefined,
+    originCountry: sanitizeString(row.origin_country),
+    originPort: sanitizeString(row.origin_port),
+    destinationCountry: sanitizeString(row.destination_country),
+    destinationPort: sanitizeString(row.destination_port),
+    hsCode: sanitizeString(row.hs_code),
+    hsDescription: sanitizeString(row.hs_description),
+    teus,
+    weightKg,
     ingestionId,
-  });
+  };
+
+  return {
+    rowNumber,
+    originalRow: row,
+    company,
+    partner,
+    companyKey: buildCompanyKey(company.name, company.kind),
+    partnerKey,
+    shipment,
+  };
+}
+
+function createErrorLogEntry(
+  ingestionId: number,
+  rowNumber: number,
+  errorMessage: string,
+  row: ShipmentRow,
+): InsertErrorLog {
+  return {
+    ingestionId,
+    rowNumber,
+    errorMessage,
+    rowData: JSON.stringify(row),
+  };
+}
+
+function sanitizeString(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+}
+
+function parseIntegerValue(value: string | number | undefined): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const normalized = String(value).replace(/[^0-9-]/g, "");
+  if (!normalized) return undefined;
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function parseNumericAsString(value: string | number | undefined): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const normalized = String(value).replace(/\s+/g, "").replace(/,/g, ".");
+  const parsed = Number.parseFloat(normalized);
+  if (!Number.isFinite(parsed)) return undefined;
+  return parsed.toString();
+}
+
+function generateFallbackShipmentNo(ingestionId: number, rowNumber: number): string {
+  const randomSuffix = Math.random().toString(36).slice(2, 8);
+  return `SH-${ingestionId}-${rowNumber}-${randomSuffix}`;
 }
 
 function parseDate(dateStr: string): Date | undefined {
   if (!dateStr) return undefined;
 
-  // Try to parse the date
   try {
-    // Excel serial date number
     if (!isNaN(Number(dateStr))) {
       const excelEpoch = new Date(1899, 11, 30);
       const days = Number(dateStr);
@@ -308,7 +466,6 @@ function parseDate(dateStr: string): Date | undefined {
       return date;
     }
 
-    // ISO date string
     const date = new Date(dateStr);
     if (!isNaN(date.getTime())) {
       return date;
@@ -318,7 +475,6 @@ function parseDate(dateStr: string): Date | undefined {
   return undefined;
 }
 
-// Simple in-memory job queue
 const jobQueue: Array<{ filePath: string; ingestionId: number }> = [];
 let isProcessing = false;
 
