@@ -24,6 +24,70 @@ export const insertCompanySchema = createInsertSchema(companies).omit({
 export type InsertCompany = z.infer<typeof insertCompanySchema>;
 export type Company = typeof companies.$inferSelect;
 
+// Users table - handles authentication and account metadata
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  emailUniqueIdx: uniqueIndex("users_email_unique_idx").on(table.email),
+}));
+
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
+
+export const userPlans = pgTable("user_plans", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  importerQuota: integer("importer_quota").notNull().default(0),
+  exporterQuota: integer("exporter_quota").notNull().default(0),
+  ncmQuota: integer("ncm_quota").notNull().default(0),
+  billingCycle: text("billing_cycle").notNull(),
+  monthlyPrice: numeric("monthly_price").notNull().default("0"),
+  annualPrice: numeric("annual_price").notNull().default("0"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  userIdx: index("user_plans_user_idx").on(table.userId),
+  statusIdx: index("user_plans_status_idx").on(table.status),
+}));
+
+export const insertUserPlanSchema = createInsertSchema(userPlans).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertUserPlan = z.infer<typeof insertUserPlanSchema>;
+export type UserPlan = typeof userPlans.$inferSelect;
+
+export const userEntitlements = pgTable("user_entitlements", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  targetKind: text("target_kind").notNull(),
+  companyId: integer("company_id").references(() => companies.id),
+  ncmCode: text("ncm_code"),
+  label: text("label").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  userKindIdx: index("user_entitlements_kind_idx").on(table.userId, table.targetKind),
+  userCompanyIdx: index("user_entitlements_company_idx").on(table.userId, table.companyId),
+  userNcmIdx: index("user_entitlements_ncm_idx").on(table.userId, table.ncmCode),
+}));
+
+export const insertUserEntitlementSchema = createInsertSchema(userEntitlements).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertUserEntitlement = z.infer<typeof insertUserEntitlementSchema>;
+export type UserEntitlement = typeof userEntitlements.$inferSelect;
+
 // Shipments table - stores maritime trade shipment data
 export const shipments = pgTable("shipments", {
   id: serial("id").primaryKey(),
