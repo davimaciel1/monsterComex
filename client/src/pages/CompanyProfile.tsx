@@ -6,6 +6,7 @@ import { TopRankingCard } from "@/components/TopRankingCard";
 import { ShipmentsTable } from "@/components/ShipmentsTable";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Ship, Package, Weight, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
@@ -22,25 +23,13 @@ export default function CompanyProfile() {
   const [, params] = useRoute("/company/:id");
   const companyId = params?.id ? parseInt(params.id) : 0;
   const [, setLocation] = useLocation();
-  const { user, isLoading: isAuthLoading } = useAuth();
-
-  useEffect(() => {
-    if (!isAuthLoading && !user) {
-      setLocation(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-    }
-  }, [user, isAuthLoading, setLocation]);
+  const { isLoading: isAuthLoading } = useAuth();
 
   const companyQuery = useQuery<Company>({
     queryKey: [`/api/companies/${companyId}`],
-    enabled: companyId > 0 && !!user,
+    enabled: companyId > 0,
     retry: false,
   });
-
-  useEffect(() => {
-    if (companyQuery.error instanceof Error && companyQuery.error.message.startsWith("401")) {
-      setLocation(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-    }
-  }, [companyQuery.error, setLocation]);
 
   const company = companyQuery.data;
   const companyError = companyQuery.error instanceof Error ? companyQuery.error.message : "";
@@ -91,6 +80,40 @@ export default function CompanyProfile() {
         <Header compact onSearch={(q) => setLocation(`/search?q=${encodeURIComponent(q)}`)} />
         <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 py-12">
           <p className="text-muted-foreground">Carregando dados da empresa...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (companyError.startsWith("401")) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header compact onSearch={(q) => setLocation(`/search?q=${encodeURIComponent(q)}`)} />
+        <div className="max-w-4xl mx-auto px-4 md:px-6 lg:px-8 py-12">
+          <Card className="space-y-4 p-6">
+            <CardHeader className="p-0">
+              <CardTitle>Disponível para clientes</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 text-muted-foreground">
+              <p>
+                Os detalhes completos desta empresa fazem parte do pacote premium da plataforma. Contrate um plano ou faça login
+                para continuar a consulta.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button onClick={() => setLocation("/planos")}>Ver planos</Button>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    setLocation(
+                      `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`,
+                    )
+                  }
+                >
+                  Já sou cliente
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     );
