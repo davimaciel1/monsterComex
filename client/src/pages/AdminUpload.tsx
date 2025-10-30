@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 export default function AdminUpload() {
   const { toast } = useToast();
 
-  const { data: ingestionsData, isLoading } = useQuery({
+  const { data: ingestionsData, isLoading } = useQuery<{ ingestions: any[]; total: number }>({
     queryKey: ['/api/ingestions'],
     refetchInterval: 3000, // Poll every 3 seconds for status updates
   });
