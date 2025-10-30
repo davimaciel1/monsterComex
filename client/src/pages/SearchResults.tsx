@@ -3,6 +3,7 @@ import { Header } from "@/components/Header";
 import { CompanyCard } from "@/components/CompanyCard";
 import { NcmCard } from "@/components/NcmCard";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -27,26 +28,21 @@ export default function SearchResults() {
   const [currentLocation, setLocation] = useLocation();
   const { toast } = useToast();
   const { user, isLoading } = useAuth();
+  const isGuest = !user;
   const query = useMemo(() => {
     const searchIndex = currentLocation.indexOf('?');
     const search = searchIndex >= 0 ? currentLocation.slice(searchIndex) : window.location.search;
     return new URLSearchParams(search).get('q') || '';
   }, [currentLocation]);
 
-  useEffect(() => {
-    if (!isLoading && !user) {
-      setLocation(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-    }
-  }, [user, isLoading, setLocation]);
-
   const companiesQuery = useQuery<CompanySearchResponse>({
     queryKey: [`/api/companies/search?q=${encodeURIComponent(query)}`],
-    enabled: !!query && !!user,
+    enabled: !!query,
   });
 
   const ncmQuery = useQuery<NcmSearchResponse>({
     queryKey: [`/api/ncm/search?q=${encodeURIComponent(query)}`],
-    enabled: !!query && !!user,
+    enabled: !!query,
   });
 
   const companies = companiesQuery.data?.results ?? [];
@@ -54,14 +50,20 @@ export default function SearchResults() {
 
   const isFetching = companiesQuery.isLoading || ncmQuery.isLoading;
   const hasResults = companies.length > 0 || ncms.length > 0;
+  const normalizedQuery = query.trim();
+  const shouldShowGuestUpsell = isGuest && normalizedQuery.length > 0 && !isFetching && !hasResults;
 
   const handleCompanyClick = (result: CompanySearchResponse["results"][number]) => {
     if (!result.allowed) {
-      toast({
-        title: "Plano insuficiente",
-        description: result.reason || "Amplie sua franquia em planos para consultar este registro.",
-        variant: "destructive",
-      });
+      if (isGuest) {
+        setLocation("/planos");
+      } else {
+        toast({
+          title: "Plano insuficiente",
+          description: result.reason || "Amplie sua franquia em planos para consultar este registro.",
+          variant: "destructive",
+        });
+      }
       return;
     }
     setLocation(`/company/${result.company.id}`);
@@ -69,23 +71,21 @@ export default function SearchResults() {
 
   const handleNcmClick = (result: NcmSearchResponse["results"][number]) => {
     if (!result.allowed) {
-      toast({
-        title: "Plano insuficiente",
-        description: result.reason || "Amplie sua franquia em planos para consultar este NCM.",
-        variant: "destructive",
-      });
+      if (isGuest) {
+        setLocation("/planos");
+      } else {
+        toast({
+          title: "Plano insuficiente",
+          description: result.reason || "Amplie sua franquia em planos para consultar este NCM.",
+          variant: "destructive",
+        });
+      }
       return;
     }
     setLocation(`/ncm/${encodeURIComponent(result.code)}`);
   };
 
-  useEffect(() => {
-    if (companiesQuery.error instanceof Error && companiesQuery.error.message.startsWith("401")) {
-      setLocation(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-    }
-  }, [companiesQuery.error, setLocation]);
-
-  if (isLoading || !user) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background">
         <Header compact onSearch={(q) => setLocation(`/search?q=${encodeURIComponent(q)}`)} />
@@ -112,6 +112,27 @@ export default function SearchResults() {
 
         {isFetching ? (
           <div className="text-center py-12 text-muted-foreground">Carregando resultados...</div>
+        ) : shouldShowGuestUpsell ? (
+          <Card className="p-8 space-y-4 text-center">
+            <h2 className="text-2xl font-semibold">Amplie seu acesso</h2>
+            <p className="text-muted-foreground">
+              Os dados completos para "{normalizedQuery}" fazem parte do acervo premium da plataforma. Contrate um plano ou faça
+              login caso já seja cliente para liberar todas as consultas.
+            </p>
+            <div className="flex flex-col sm:flex-row justify-center gap-3">
+              <Button onClick={() => setLocation("/planos")}>Conheça os planos</Button>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setLocation(
+                    `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`,
+                  )
+                }
+              >
+                Já sou cliente
+              </Button>
+            </div>
+          </Card>
         ) : !hasResults ? (
           <Card className="p-8 text-center text-muted-foreground">
             Nenhum importador, exportador ou NCM foi localizado para "{query}". Ajuste seu termo ou entre em contato
