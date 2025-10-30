@@ -1,12 +1,15 @@
+import { useEffect } from "react";
 import { Header } from "@/components/Header";
 import { KPICard } from "@/components/KPICard";
 import { ShipmentsChart } from "@/components/ShipmentsChart";
 import { TopRankingCard } from "@/components/TopRankingCard";
 import { ShipmentsTable } from "@/components/ShipmentsTable";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Ship, Package, Weight, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useRoute } from "wouter";
+import { useRoute, useLocation } from "wouter";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Company {
   id: number;
@@ -18,11 +21,29 @@ interface Company {
 export default function CompanyProfile() {
   const [, params] = useRoute("/company/:id");
   const companyId = params?.id ? parseInt(params.id) : 0;
+  const [, setLocation] = useLocation();
+  const { user, isLoading: isAuthLoading } = useAuth();
 
-  const { data: company } = useQuery<Company>({
+  useEffect(() => {
+    if (!isAuthLoading && !user) {
+      setLocation(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    }
+  }, [user, isAuthLoading, setLocation]);
+
+  const companyQuery = useQuery<Company>({
     queryKey: [`/api/companies/${companyId}`],
-    enabled: companyId > 0,
+    enabled: companyId > 0 && !!user,
+    retry: false,
   });
+
+  useEffect(() => {
+    if (companyQuery.error instanceof Error && companyQuery.error.message.startsWith("401")) {
+      setLocation(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    }
+  }, [companyQuery.error, setLocation]);
+
+  const company = companyQuery.data;
+  const companyError = companyQuery.error instanceof Error ? companyQuery.error.message : "";
 
   const { data: stats } = useQuery<{
     totalShipments: number;
@@ -31,45 +52,84 @@ export default function CompanyProfile() {
     uniquePartners: number;
   }>({
     queryKey: [`/api/companies/${companyId}/stats`],
-    enabled: companyId > 0,
+    enabled: companyId > 0 && !!company,
   });
 
   const { data: chartData = [] } = useQuery<Array<{ month: string; shipments: number }>>({
     queryKey: [`/api/companies/${companyId}/shipments-over-time`],
-    enabled: companyId > 0,
+    enabled: companyId > 0 && !!company,
   });
 
   const { data: topPartners = [] } = useQuery<Array<{ name: string; count: number }>>({
     queryKey: [`/api/companies/${companyId}/top-partners`],
-    enabled: companyId > 0,
+    enabled: companyId > 0 && !!company,
   });
 
   const { data: topOriginCountries = [] } = useQuery<Array<{ name: string; count: number }>>({
     queryKey: [`/api/companies/${companyId}/top-origin-countries`],
-    enabled: companyId > 0,
+    enabled: companyId > 0 && !!company,
   });
 
   const { data: topDestinationPorts = [] } = useQuery<Array<{ name: string; count: number }>>({
     queryKey: [`/api/companies/${companyId}/top-destination-ports`],
-    enabled: companyId > 0,
+    enabled: companyId > 0 && !!company,
   });
 
   const { data: topHSCodes = [] } = useQuery<Array<{ name: string; count: number }>>({
     queryKey: [`/api/companies/${companyId}/top-hs-codes`],
-    enabled: companyId > 0,
+    enabled: companyId > 0 && !!company,
   });
 
   const { data: shipmentsData } = useQuery<{ shipments: any[]; total: number }>({
     queryKey: [`/api/companies/${companyId}/shipments`],
-    enabled: companyId > 0,
+    enabled: companyId > 0 && !!company,
   });
 
-  if (!company) {
+  if (isAuthLoading || companyQuery.isLoading) {
     return (
       <div className="min-h-screen bg-background">
-        <Header compact onSearch={(q) => console.log('Search:', q)} />
+        <Header compact onSearch={(q) => setLocation(`/search?q=${encodeURIComponent(q)}`)} />
         <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 py-12">
-          <p className="text-muted-foreground">Carregando...</p>
+          <p className="text-muted-foreground">Carregando dados da empresa...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (companyError.startsWith("403")) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header compact onSearch={(q) => setLocation(`/search?q=${encodeURIComponent(q)}`)} />
+        <div className="max-w-4xl mx-auto px-4 md:px-6 lg:px-8 py-12">
+          <Card>
+            <CardHeader>
+              <CardTitle>Plano insuficiente</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-muted-foreground">
+              <p>Você atingiu o limite de consultas contratadas para empresas deste tipo.</p>
+              <p>
+                Ajuste seu plano em <button className="underline" onClick={() => setLocation("/planos")}>Planos</button> para liberar novas consultas.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (companyError.startsWith("404") || !company) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header compact onSearch={(q) => setLocation(`/search?q=${encodeURIComponent(q)}`)} />
+        <div className="max-w-4xl mx-auto px-4 md:px-6 lg:px-8 py-12">
+          <Card>
+            <CardHeader>
+              <CardTitle>Empresa não encontrada</CardTitle>
+            </CardHeader>
+            <CardContent className="text-muted-foreground">
+              Não localizamos esta empresa em nossa base. Entre em contato com nossa equipe para disponibilizar novos dados.
+            </CardContent>
+          </Card>
         </div>
       </div>
     );
@@ -92,7 +152,7 @@ export default function CompanyProfile() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header compact onSearch={(q) => console.log('Search:', q)} />
+      <Header compact onSearch={(q) => setLocation(`/search?q=${encodeURIComponent(q)}`)} />
       
       <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 py-12 space-y-12">
         <div className="space-y-4">
