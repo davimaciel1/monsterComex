@@ -9,13 +9,15 @@ interface CompanyCardProps {
   countryCode: string;
   score?: number;
   onClick?: () => void;
+  allowed?: boolean;
+  lockReason?: string;
 }
 
-export function CompanyCard({ name, kind, countryCode, score, onClick }: CompanyCardProps) {
+export function CompanyCard({ name, kind, countryCode, score, onClick, allowed = true, lockReason }: CompanyCardProps) {
   return (
-    <Card 
-      className="p-6 hover-elevate cursor-pointer" 
-      onClick={onClick}
+    <Card
+      className={`p-6 transition ${allowed ? "hover-elevate cursor-pointer" : "border-dashed opacity-70"}`}
+      onClick={allowed ? onClick : undefined}
       data-testid={`card-company-${name}`}
     >
       <div className="flex items-start justify-between gap-4">
@@ -46,6 +48,11 @@ export function CompanyCard({ name, kind, countryCode, score, onClick }: Company
           </div>
         )}
       </div>
+      {!allowed && lockReason && (
+        <p className="mt-4 text-sm text-muted-foreground" data-testid="text-company-locked">
+          {lockReason}
+        </p>
+      )}
     </Card>
   );
 }
