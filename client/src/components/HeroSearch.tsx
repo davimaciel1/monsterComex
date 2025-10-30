@@ -43,7 +43,7 @@ export function HeroSearch({ onSearch }: HeroSearchProps) {
           <div className="relative">
             <Input
               type="search"
-              placeholder="Busque por qualquer importador ou exportador..."
+              placeholder="Busque por qualquer importador, exportador ou NCM..."
               className="h-14 text-base pr-14 rounded-full border-2"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
