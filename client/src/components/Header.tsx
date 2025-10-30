@@ -1,6 +1,9 @@
 import { Search, Anchor } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { useLocation } from "wouter";
 import { useState } from "react";
 
 interface HeaderProps {
@@ -10,12 +13,41 @@ interface HeaderProps {
 
 export function Header({ onSearch, compact = false }: HeaderProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const { user, logout, logoutStatus } = useAuth();
+  const { toast } = useToast();
+  const [, setLocation] = useLocation();
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
       onSearch?.(searchQuery);
       console.log('Search triggered:', searchQuery);
+    }
+  };
+
+  const handleLoginClick = () => {
+    const currentPath = window.location.pathname + window.location.search;
+    setLocation(`/login?redirect=${encodeURIComponent(currentPath)}`);
+  };
+
+  const handlePlanClick = () => {
+    setLocation("/planos");
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast({
+        title: "Você saiu da sua conta",
+        description: "Entre novamente quando quiser continuar as consultas.",
+      });
+      setLocation("/login");
+    } catch (error: any) {
+      toast({
+        title: "Não foi possível sair",
+        description: error?.message || "Tente novamente em instantes.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -28,7 +60,7 @@ export function Header({ onSearch, compact = false }: HeaderProps) {
               <div className="relative">
                 <Input
                   type="search"
-                  placeholder="Busque por qualquer importador ou exportador..."
+                  placeholder="Busque por qualquer importador, exportador ou NCM..."
                   className="pr-10 h-10"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -48,9 +80,26 @@ export function Header({ onSearch, compact = false }: HeaderProps) {
           )}
 
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" data-testid="button-login">
-              Entrar
-            </Button>
+            {user ? (
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={handlePlanClick} data-testid="button-planos">
+                  Meu Plano
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLogout}
+                  disabled={logoutStatus === "pending"}
+                  data-testid="button-logout"
+                >
+                  Sair
+                </Button>
+              </div>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={handleLoginClick} data-testid="button-login">
+                Entrar
+              </Button>
+            )}
           </div>
         </div>
       </div>

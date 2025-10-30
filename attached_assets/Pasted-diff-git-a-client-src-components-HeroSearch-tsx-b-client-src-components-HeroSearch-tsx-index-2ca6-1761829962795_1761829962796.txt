@@ -1,0 +1,55 @@
+diff --git a/client/src/components/HeroSearch.tsx b/client/src/components/HeroSearch.tsx
+index 2ca6aa643636d3e9c202ea5b47aeb46fc7d3a826..6683cd8c58c3e55be6c2901ba3aa9f7d6b2a29ee 100644
+--- a/client/src/components/HeroSearch.tsx
++++ b/client/src/components/HeroSearch.tsx
+@@ -21,49 +21,49 @@ export function HeroSearch({ onSearch }: HeroSearchProps) {
+ 
+   return (
+     <div className="py-20 md:py-32 px-4">
+       <div className="max-w-4xl mx-auto text-center space-y-8">
+         <div className="space-y-4">
+           <div className="flex justify-center mb-6">
+             <img 
+               src={logoImage} 
+               alt="Trade Radar Logo" 
+               className="w-48 h-48 object-contain"
+               data-testid="img-logo"
+             />
+           </div>
+           <h1 className="text-3xl md:text-5xl font-bold" data-testid="text-hero-title">
+             Encontre Qualquer Importador ou Exportador
+           </h1>
+           <p className="text-lg text-muted-foreground" data-testid="text-hero-subtitle">
+             Busque dados de comércio marítimo instantaneamente
+           </p>
+         </div>
+ 
+         <form onSubmit={handleSearch} className="max-w-2xl mx-auto">
+           <div className="relative">
+             <Input
+               type="search"
+-              placeholder="Busque por qualquer importador ou exportador..."
++              placeholder="Busque por qualquer importador, exportador ou NCM..."
+               className="h-14 text-base pr-14 rounded-full border-2"
+               value={searchQuery}
+               onChange={(e) => setSearchQuery(e.target.value)}
+               data-testid="input-hero-search"
+             />
+             <Button 
+               type="submit" 
+               size="icon" 
+               className="absolute right-1 top-1 h-12 w-12 rounded-full bg-cyan-500 hover:bg-cyan-600" 
+               data-testid="button-hero-search"
+             >
+               <Search className="h-5 w-5" />
+             </Button>
+           </div>
+         </form>
+ 
+         <Button variant="ghost" size="sm" data-testid="button-random-company">
+           Experimente uma empresa aleatória
+         </Button>
+       </div>
+     </div>
+   );
+ }
