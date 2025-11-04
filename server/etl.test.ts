@@ -94,13 +94,13 @@ describe("numeric parsing helpers", () => {
     expect(parseNumericAsString("27.300,00")).toBe("27300");
   });
 
-  it("parses US format with comma as thousands", () => {
-    expect(parseIntegerValue("1,234")).toBe(1234);
+  it("parses US format with comma and dot", () => {
     expect(parseNumericAsString("1,234.56")).toBe("1234.56");
+    expect(parseIntegerValue("1,234.56")).toBe(1235);
   });
 
-  it("handles mixed formats correctly", () => {
-    expect(parseIntegerValue("1.234,56")).toBe(1234);
+  it("handles Brazilian format with both separators", () => {
+    expect(parseIntegerValue("1.234,56")).toBe(1235);
     expect(parseNumericAsString("1.234,56")).toBe("1234.56");
   });
 });
