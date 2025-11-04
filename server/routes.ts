@@ -56,6 +56,28 @@ function computeUsage(entitlements: UserEntitlement[]): UsageCounts {
 }
 
 async function getEntitlementContext(userId: number): Promise<EntitlementContext> {
+  const user = await storage.getUserById(userId);
+  
+  if (user?.isAdmin) {
+    return {
+      plan: {
+        id: -1,
+        userId,
+        importerQuota: 999999,
+        exporterQuota: 999999,
+        ncmQuota: 999999,
+        billingCycle: 'monthly',
+        monthlyPrice: '0',
+        annualPrice: '0',
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      entitlements: [],
+      usage: { importer: 0, exporter: 0, ncm: 0 },
+    };
+  }
+
   const [plan, entitlements] = await Promise.all([
     storage.getActivePlanByUserId(userId),
     storage.listEntitlementsByUser(userId),
@@ -163,6 +185,12 @@ async function ensureCompanyAccess(
   }
 
   const context = existingContext ?? await getEntitlementContext(userId);
+  
+  const user = await storage.getUserById(userId);
+  if (user?.isAdmin) {
+    return { company, context };
+  }
+
   const entitlement = context.entitlements.find((entry) => entry.companyId === companyId);
 
   const kind: 'importer' | 'exporter' = company.kind === 'importer' ? 'importer' : 'exporter';
@@ -197,6 +225,12 @@ async function ensureNcmAccess(
 ): Promise<{ context: EntitlementContext; error?: { status: number; message: string } }> {
   const normalizedCode = code.trim();
   const context = existingContext ?? await getEntitlementContext(userId);
+  
+  const user = await storage.getUserById(userId);
+  if (user?.isAdmin) {
+    return { context };
+  }
+
   const entitlement = context.entitlements.find((entry) => entry.ncmCode === normalizedCode);
 
   if (entitlement) {
