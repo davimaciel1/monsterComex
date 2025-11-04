@@ -265,16 +265,14 @@ export class DatabaseStorage implements IStorage {
   
   async getShipmentsByCompanyId(companyId: number, limit = 10, offset = 0): Promise<{ shipments: any[]; total: number }> {
     const { shipments, companies } = await import("@shared/schema");
-    const { eq, count, desc, or } = await import("drizzle-orm");
+    const { eq, count, desc } = await import("drizzle-orm");
     
     const company = await this.getCompanyById(companyId);
     if (!company) {
       return { shipments: [], total: 0 };
     }
     
-    const whereCondition = company.kind === 'importer' 
-      ? eq(shipments.partnerId, companyId)
-      : eq(shipments.companyId, companyId);
+    const whereCondition = eq(shipments.companyId, companyId);
     
     const [shipmentsResult, totalResult] = await Promise.all([
       this.db
@@ -297,9 +295,7 @@ export class DatabaseStorage implements IStorage {
           }
         })
         .from(shipments)
-        .leftJoin(companies, company.kind === 'importer' 
-          ? eq(shipments.companyId, companies.id)
-          : eq(shipments.partnerId, companies.id))
+        .leftJoin(companies, eq(shipments.partnerId, companies.id))
         .where(whereCondition)
         .limit(limit)
         .offset(offset)
@@ -350,13 +346,9 @@ export class DatabaseStorage implements IStorage {
       return { totalShipments: 0, totalTEUs: 0, totalWeightKg: 0, uniquePartners: 0 };
     }
     
-    const whereCondition = company.kind === 'importer' 
-      ? eq(shipments.partnerId, companyId)
-      : eq(shipments.companyId, companyId);
-    
-    const partnerColumn = company.kind === 'importer'
-      ? shipments.companyId
-      : shipments.partnerId;
+    const whereCondition = eq(shipments.companyId, companyId);
+
+    const partnerColumn = shipments.partnerId;
     
     const result = await this.db
       .select({
@@ -383,9 +375,7 @@ export class DatabaseStorage implements IStorage {
     const company = await this.getCompanyById(companyId);
     if (!company) return [];
     
-    const whereCondition = company.kind === 'importer' 
-      ? eq(shipments.partnerId, companyId)
-      : eq(shipments.companyId, companyId);
+    const whereCondition = eq(shipments.companyId, companyId);
     
     const result = await this.db
       .select({
@@ -410,13 +400,9 @@ export class DatabaseStorage implements IStorage {
     const company = await this.getCompanyById(companyId);
     if (!company) return [];
     
-    const whereCondition = company.kind === 'importer' 
-      ? eq(shipments.partnerId, companyId)
-      : eq(shipments.companyId, companyId);
-    
-    const joinCondition = company.kind === 'importer'
-      ? eq(shipments.companyId, companies.id)
-      : eq(shipments.partnerId, companies.id);
+    const whereCondition = eq(shipments.companyId, companyId);
+
+    const joinCondition = eq(shipments.partnerId, companies.id);
     
     const result = await this.db
       .select({
@@ -438,14 +424,12 @@ export class DatabaseStorage implements IStorage {
   
   async getTopOriginCountries(companyId: number, limit = 5): Promise<Array<{ name: string; count: number }>> {
     const { shipments } = await import("@shared/schema");
-    const { eq, count, desc, isNotNull } = await import("drizzle-orm");
+    const { eq, count, desc } = await import("drizzle-orm");
     
     const company = await this.getCompanyById(companyId);
     if (!company) return [];
     
-    const whereCondition = company.kind === 'importer' 
-      ? eq(shipments.partnerId, companyId)
-      : eq(shipments.companyId, companyId);
+    const whereCondition = eq(shipments.companyId, companyId);
     
     const result = await this.db
       .select({
@@ -473,9 +457,7 @@ export class DatabaseStorage implements IStorage {
     const company = await this.getCompanyById(companyId);
     if (!company) return [];
     
-    const whereCondition = company.kind === 'importer' 
-      ? eq(shipments.partnerId, companyId)
-      : eq(shipments.companyId, companyId);
+    const whereCondition = eq(shipments.companyId, companyId);
     
     const result = await this.db
       .select({
@@ -503,9 +485,7 @@ export class DatabaseStorage implements IStorage {
     const company = await this.getCompanyById(companyId);
     if (!company) return [];
     
-    const whereCondition = company.kind === 'importer' 
-      ? eq(shipments.partnerId, companyId)
-      : eq(shipments.companyId, companyId);
+    const whereCondition = eq(shipments.companyId, companyId);
     
     const result = await this.db
       .select({

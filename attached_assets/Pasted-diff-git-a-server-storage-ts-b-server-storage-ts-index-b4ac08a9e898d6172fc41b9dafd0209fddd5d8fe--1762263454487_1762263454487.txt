@@ -1,0 +1,310 @@
+diff --git a/server/storage.ts b/server/storage.ts
+index b4ac08a9e898d6172fc41b9dafd0209fddd5d8fe..5cf1a2f167cac26a78ab1d391c62f4f36a2aab73 100644
+--- a/server/storage.ts
++++ b/server/storage.ts
+@@ -242,291 +242,271 @@ export class DatabaseStorage implements IStorage {
+     const resultMap = new Map<string, Company>();
+     for (const row of rows) {
+       resultMap.set(buildCompanyKey(row.name, row.kind), row);
+     }
+ 
+     if (resultMap.size < deduped.size) {
+       const missingValues = values.filter((value) => !resultMap.has(buildCompanyKey(value.name, value.kind)));
+       if (missingValues.length > 0) {
+         const conditions = missingValues.map((item) => sql`(${companies.name} = ${item.name} and ${companies.kind} = ${item.kind})`);
+         const existing = await tx
+           .select()
+           .from(companies)
+           .where(sql.join(conditions, sql` or `));
+ 
+         for (const row of existing) {
+           resultMap.set(buildCompanyKey(row.name, row.kind), row);
+         }
+       }
+     }
+ 
+     return resultMap;
+   }
+   
+   async getShipmentsByCompanyId(companyId: number, limit = 10, offset = 0): Promise<{ shipments: any[]; total: number }> {
+     const { shipments, companies } = await import("@shared/schema");
+-    const { eq, count, desc, or } = await import("drizzle-orm");
++    const { eq, count, desc } = await import("drizzle-orm");
+     
+     const company = await this.getCompanyById(companyId);
+     if (!company) {
+       return { shipments: [], total: 0 };
+     }
+     
+-    const whereCondition = company.kind === 'importer' 
+-      ? eq(shipments.partnerId, companyId)
+-      : eq(shipments.companyId, companyId);
++    const whereCondition = eq(shipments.companyId, companyId);
+     
+     const [shipmentsResult, totalResult] = await Promise.all([
+       this.db
+         .select({
+           id: shipments.id,
+           shipmentNo: shipments.shipmentNo,
+           ets: shipments.ets,
+           eta: shipments.eta,
+           originCountry: shipments.originCountry,
+           originPort: shipments.originPort,
+           destinationCountry: shipments.destinationCountry,
+           destinationPort: shipments.destinationPort,
+           hsCode: shipments.hsCode,
+           hsDescription: shipments.hsDescription,
+           teus: shipments.teus,
+           weightKg: shipments.weightKg,
+           partner: {
+             id: companies.id,
+             name: companies.name,
+           }
+         })
+         .from(shipments)
+-        .leftJoin(companies, company.kind === 'importer' 
+-          ? eq(shipments.companyId, companies.id)
+-          : eq(shipments.partnerId, companies.id))
++        .leftJoin(companies, eq(shipments.partnerId, companies.id))
+         .where(whereCondition)
+         .limit(limit)
+         .offset(offset)
+         .orderBy(desc(shipments.ets)),
+       this.db
+         .select({ count: count() })
+         .from(shipments)
+         .where(whereCondition)
+     ]);
+     
+     return {
+       shipments: shipmentsResult,
+       total: totalResult[0]?.count || 0
+     };
+   }
+   
+   async createShipment(shipment: InsertShipment): Promise<Shipment> {
+     const { shipments } = await import("@shared/schema");
+ 
+     const result = await this.db
+       .insert(shipments)
+       .values(shipment)
+       .returning();
+ 
+     return result[0];
+   }
+ 
+   async createShipmentsBatch(shipmentsToInsert: InsertShipment[], tx: any = this.db): Promise<void> {
+     if (!shipmentsToInsert.length) {
+       return;
+     }
+ 
+     const { shipments } = await import("@shared/schema");
+     await tx.insert(shipments).values(shipmentsToInsert);
+   }
+   
+   async getCompanyStats(companyId: number): Promise<{
+     totalShipments: number;
+     totalTEUs: number;
+     totalWeightKg: number;
+     uniquePartners: number;
+   }> {
+     const { shipments } = await import("@shared/schema");
+     const { eq, count, sum, countDistinct, sql } = await import("drizzle-orm");
+     
+     const company = await this.getCompanyById(companyId);
+     if (!company) {
+       return { totalShipments: 0, totalTEUs: 0, totalWeightKg: 0, uniquePartners: 0 };
+     }
+     
+-    const whereCondition = company.kind === 'importer' 
+-      ? eq(shipments.partnerId, companyId)
+-      : eq(shipments.companyId, companyId);
+-    
+-    const partnerColumn = company.kind === 'importer'
+-      ? shipments.companyId
+-      : shipments.partnerId;
++    const whereCondition = eq(shipments.companyId, companyId);
++
++    const partnerColumn = shipments.partnerId;
+     
+     const result = await this.db
+       .select({
+         totalShipments: count(),
+         totalTEUs: sum(shipments.teus),
+         totalWeightKg: sql<string>`sum(CAST(${shipments.weightKg} AS DECIMAL))`,
+         uniquePartners: countDistinct(partnerColumn),
+       })
+       .from(shipments)
+       .where(whereCondition);
+     
+     return {
+       totalShipments: result[0]?.totalShipments || 0,
+       totalTEUs: result[0]?.totalTEUs || 0,
+       totalWeightKg: parseFloat(result[0]?.totalWeightKg || '0'),
+       uniquePartners: result[0]?.uniquePartners || 0,
+     };
+   }
+   
+   async getCompanyShipmentsOverTime(companyId: number): Promise<Array<{ month: string; shipments: number }>> {
+     const { shipments } = await import("@shared/schema");
+     const { eq, sql, desc } = await import("drizzle-orm");
+     
+     const company = await this.getCompanyById(companyId);
+     if (!company) return [];
+     
+-    const whereCondition = company.kind === 'importer' 
+-      ? eq(shipments.partnerId, companyId)
+-      : eq(shipments.companyId, companyId);
++    const whereCondition = eq(shipments.companyId, companyId);
+     
+     const result = await this.db
+       .select({
+         month: sql<string>`TO_CHAR(${shipments.ets}, 'YYYY-MM')`,
+         shipments: sql<number>`count(*)::int`,
+       })
+       .from(shipments)
+       .where(whereCondition)
+       .groupBy(sql`TO_CHAR(${shipments.ets}, 'YYYY-MM')`)
+       .orderBy(sql`TO_CHAR(${shipments.ets}, 'YYYY-MM')`);
+     
+     return result.map((r: any) => ({
+       month: r.month || '',
+       shipments: r.shipments || 0
+     }));
+   }
+   
+   async getTopPartners(companyId: number, limit = 5): Promise<Array<{ name: string; count: number }>> {
+     const { shipments, companies } = await import("@shared/schema");
+     const { eq, count, sql, desc } = await import("drizzle-orm");
+     
+     const company = await this.getCompanyById(companyId);
+     if (!company) return [];
+     
+-    const whereCondition = company.kind === 'importer' 
+-      ? eq(shipments.partnerId, companyId)
+-      : eq(shipments.companyId, companyId);
+-    
+-    const joinCondition = company.kind === 'importer'
+-      ? eq(shipments.companyId, companies.id)
+-      : eq(shipments.partnerId, companies.id);
++    const whereCondition = eq(shipments.companyId, companyId);
++
++    const joinCondition = eq(shipments.partnerId, companies.id);
+     
+     const result = await this.db
+       .select({
+         name: companies.name,
+         count: count()
+       })
+       .from(shipments)
+       .innerJoin(companies, joinCondition)
+       .where(whereCondition)
+       .groupBy(companies.name)
+       .orderBy(desc(count()))
+       .limit(limit);
+     
+     return result.map((r: any) => ({
+       name: r.name || '',
+       count: r.count || 0
+     }));
+   }
+   
+   async getTopOriginCountries(companyId: number, limit = 5): Promise<Array<{ name: string; count: number }>> {
+     const { shipments } = await import("@shared/schema");
+-    const { eq, count, desc, isNotNull } = await import("drizzle-orm");
++    const { eq, count, desc } = await import("drizzle-orm");
+     
+     const company = await this.getCompanyById(companyId);
+     if (!company) return [];
+     
+-    const whereCondition = company.kind === 'importer' 
+-      ? eq(shipments.partnerId, companyId)
+-      : eq(shipments.companyId, companyId);
++    const whereCondition = eq(shipments.companyId, companyId);
+     
+     const result = await this.db
+       .select({
+         name: shipments.originCountry,
+         count: count()
+       })
+       .from(shipments)
+       .where(whereCondition)
+       .groupBy(shipments.originCountry)
+       .orderBy(desc(count()))
+       .limit(limit);
+     
+     return result
+       .filter((r: any) => r.name)
+       .map((r: any) => ({
+         name: r.name || '',
+         count: r.count || 0
+       }));
+   }
+   
+   async getTopDestinationPorts(companyId: number, limit = 5): Promise<Array<{ name: string; count: number }>> {
+     const { shipments } = await import("@shared/schema");
+     const { eq, count, desc } = await import("drizzle-orm");
+     
+     const company = await this.getCompanyById(companyId);
+     if (!company) return [];
+     
+-    const whereCondition = company.kind === 'importer' 
+-      ? eq(shipments.partnerId, companyId)
+-      : eq(shipments.companyId, companyId);
++    const whereCondition = eq(shipments.companyId, companyId);
+     
+     const result = await this.db
+       .select({
+         name: shipments.destinationPort,
+         count: count()
+       })
+       .from(shipments)
+       .where(whereCondition)
+       .groupBy(shipments.destinationPort)
+       .orderBy(desc(count()))
+       .limit(limit);
+     
+     return result
+       .filter((r: any) => r.name)
+       .map((r: any) => ({
+         name: r.name || '',
+         count: r.count || 0
+       }));
+   }
+   
+   async getTopHSCodes(companyId: number, limit = 5): Promise<Array<{ name: string; count: number }>> {
+     const { shipments } = await import("@shared/schema");
+     const { eq, count, desc, sql } = await import("drizzle-orm");
+     
+     const company = await this.getCompanyById(companyId);
+     if (!company) return [];
+     
+-    const whereCondition = company.kind === 'importer' 
+-      ? eq(shipments.partnerId, companyId)
+-      : eq(shipments.companyId, companyId);
++    const whereCondition = eq(shipments.companyId, companyId);
+     
+     const result = await this.db
+       .select({
+         hsCode: shipments.hsCode,
+         hsDescription: shipments.hsDescription,
+         count: count()
+       })
+       .from(shipments)
+       .where(whereCondition)
+       .groupBy(shipments.hsCode, shipments.hsDescription)
+       .orderBy(desc(count()))
+       .limit(limit);
+     
+     return result
+       .filter((r: any) => r.hsCode)
+       .map((r: any) => ({
+         name: r.hsDescription ? `${r.hsCode} - ${r.hsDescription}` : r.hsCode || '',
+         count: r.count || 0
+       }));
+   }
+   
+   async createIngestion(ingestion: InsertIngestion): Promise<Ingestion> {
+     const { ingestions } = await import("@shared/schema");
+     
+     const result = await this.db
