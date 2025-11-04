@@ -8,6 +8,10 @@ interface ShipmentRow {
   company_name?: string;
   company_kind?: string;
   company_country?: string;
+  importer_name?: string;
+  importer_country?: string;
+  exporter_name?: string;
+  exporter_country?: string;
   shipment_no?: string;
   ets?: string;
   eta?: string;
@@ -30,10 +34,16 @@ const HEADER_MAPPINGS: Record<string, CanonicalShipmentField> = {
   nomedaempresa: "company_name",
   razaosocial: "company_name",
   empresanome: "company_name",
-  nomeexportador: "company_name",
-  exportador: "company_name",
-  consignatario: "partner_name",
-  importador: "partner_name",
+  nomeexportador: "exporter_name",
+  exportador: "exporter_name",
+  exportername: "exporter_name",
+  exportercountry: "exporter_country",
+  paisexportador: "exporter_country",
+  consignatario: "importer_name",
+  importador: "importer_name",
+  importername: "importer_name",
+  importercountry: "importer_country",
+  paisimportador: "importer_country",
   companykind: "company_kind",
   tipodeempresa: "company_kind",
   tipoempresa: "company_kind",
@@ -383,7 +393,7 @@ async function processShipmentBatch(
   return { ok, failed };
 }
 
-function prepareShipmentEntry(
+export function prepareShipmentEntry(
   row: ShipmentRow, 
   rowNumber: number, 
   ingestionId: number,
@@ -392,13 +402,32 @@ function prepareShipmentEntry(
 ): PreparedShipmentEntry {
   let companyKind: string | undefined;
   let companyName: string | undefined;
+  let companyCountry: string | undefined;
 
   if (targetCompanyName && targetCompanyKind) {
     companyName = targetCompanyName;
     companyKind = targetCompanyKind;
+    companyCountry = targetCompanyKind === 'importer' 
+      ? (sanitizeString(row.importer_country) ?? sanitizeString(row.company_country))
+      : (sanitizeString(row.exporter_country) ?? sanitizeString(row.company_country));
   } else {
-    companyKind = normalizeCompanyKind(row.company_kind);
-    companyName = sanitizeString(row.company_name);
+    if (row.importer_name && !row.exporter_name) {
+      companyName = sanitizeString(row.importer_name);
+      companyKind = 'importer';
+      companyCountry = sanitizeString(row.importer_country);
+    } else if (row.exporter_name && !row.importer_name) {
+      companyName = sanitizeString(row.exporter_name);
+      companyKind = 'exporter';
+      companyCountry = sanitizeString(row.exporter_country);
+    } else if (row.importer_name && row.exporter_name) {
+      companyName = sanitizeString(row.importer_name);
+      companyKind = 'importer';
+      companyCountry = sanitizeString(row.importer_country);
+    } else {
+      companyKind = normalizeCompanyKind(row.company_kind);
+      companyName = sanitizeString(row.company_name);
+      companyCountry = sanitizeString(row.company_country);
+    }
 
     if (!companyName || !companyKind) {
       throw new Error('Campos obrigatórios faltando: company_name, company_kind');
@@ -413,18 +442,36 @@ function prepareShipmentEntry(
   const company: InsertCompany = {
     name: companyName,
     kind: normalizedKind,
-    countryCode: sanitizeString(row.company_country) ?? 'Unknown',
+    countryCode: companyCountry ?? 'Unknown',
   };
 
   let partner: InsertCompany | undefined;
   let partnerKey: string | undefined;
-  const partnerName = sanitizeString(row.partner_name);
+
+  const partnerKind: TradeRole = normalizedKind === 'importer' ? 'exporter' : 'importer';
+  
+  let partnerName: string | undefined;
+  let partnerCountry: string | undefined;
+
+  if (row.importer_name || row.exporter_name) {
+    partnerName = partnerKind === 'exporter' 
+      ? sanitizeString(row.exporter_name)
+      : sanitizeString(row.importer_name);
+    partnerCountry = partnerKind === 'exporter'
+      ? sanitizeString(row.exporter_country)
+      : sanitizeString(row.importer_country);
+  }
+  
+  if (!partnerName) {
+    partnerName = sanitizeString(row.partner_name);
+    partnerCountry = sanitizeString(row.partner_country);
+  }
+
   if (partnerName) {
-    const partnerKind: TradeRole = normalizedKind === 'importer' ? 'exporter' : 'importer';
     partner = {
       name: partnerName,
       kind: partnerKind,
-      countryCode: sanitizeString(row.partner_country) ?? 'Unknown',
+      countryCode: partnerCountry ?? 'Unknown',
     };
     partnerKey = buildCompanyKey(partner.name, partner.kind);
   }
@@ -480,17 +527,87 @@ function sanitizeString(value: string | undefined): string | undefined {
   return trimmed.length ? trimmed : undefined;
 }
 
-function parseIntegerValue(value: string | number | undefined): number | undefined {
+export function parseIntegerValue(value: string | number | undefined): number | undefined {
   if (value === undefined || value === null) return undefined;
-  const normalized = String(value).replace(/[^0-9-]/g, "");
+  const str = String(value).trim();
+  
+  const hasComma = str.includes(',');
+  const hasDot = str.includes('.');
+  
+  if (hasComma && hasDot) {
+    const lastComma = str.lastIndexOf(',');
+    const lastDot = str.lastIndexOf('.');
+    
+    if (lastComma > lastDot) {
+      const normalized = str.replace(/\./g, '').replace(',', '.');
+      const parsed = Number.parseInt(normalized, 10);
+      return Number.isNaN(parsed) ? undefined : parsed;
+    } else {
+      const normalized = str.replace(/,/g, '');
+      const parsed = Number.parseInt(normalized, 10);
+      return Number.isNaN(parsed) ? undefined : parsed;
+    }
+  } else if (hasComma) {
+    const commaPos = str.indexOf(',');
+    const digitsAfterComma = str.substring(commaPos + 1).replace(/[^0-9]/g, '').length;
+    
+    if (digitsAfterComma <= 2) {
+      const normalized = str.replace(',', '.');
+      const parsed = Number.parseInt(normalized, 10);
+      return Number.isNaN(parsed) ? undefined : parsed;
+    } else {
+      const normalized = str.replace(/,/g, '');
+      const parsed = Number.parseInt(normalized, 10);
+      return Number.isNaN(parsed) ? undefined : parsed;
+    }
+  }
+  
+  const normalized = str.replace(/[^0-9-]/g, "");
   if (!normalized) return undefined;
   const parsed = Number.parseInt(normalized, 10);
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-function parseNumericAsString(value: string | number | undefined): string | undefined {
+export function parseNumericAsString(value: string | number | undefined): string | undefined {
   if (value === undefined || value === null) return undefined;
-  const normalized = String(value).replace(/\s+/g, "").replace(/,/g, ".");
+  const str = String(value).trim();
+  
+  const hasComma = str.includes(',');
+  const hasDot = str.includes('.');
+  
+  if (hasComma && hasDot) {
+    const lastComma = str.lastIndexOf(',');
+    const lastDot = str.lastIndexOf('.');
+    
+    if (lastComma > lastDot) {
+      const normalized = str.replace(/\./g, '').replace(',', '.');
+      const parsed = Number.parseFloat(normalized);
+      if (!Number.isFinite(parsed)) return undefined;
+      return parsed.toString();
+    } else {
+      const normalized = str.replace(/,/g, '');
+      const parsed = Number.parseFloat(normalized);
+      if (!Number.isFinite(parsed)) return undefined;
+      return parsed.toString();
+    }
+  } else if (hasComma) {
+    const commaPos = str.indexOf(',');
+    const digitsAfterComma = str.substring(commaPos + 1).replace(/[^0-9]/g, '').length;
+    
+    if (digitsAfterComma <= 2) {
+      const normalized = str.replace(',', '.');
+      const parsed = Number.parseFloat(normalized);
+      if (!Number.isFinite(parsed)) return undefined;
+      return parsed.toString();
+    } else {
+      const normalized = str.replace(/,/g, '');
+      const parsed = Number.parseFloat(normalized);
+      if (!Number.isFinite(parsed)) return undefined;
+      return parsed.toString();
+    }
+  }
+  
+  const normalized = str.replace(/\s+/g, "");
   const parsed = Number.parseFloat(normalized);
   if (!Number.isFinite(parsed)) return undefined;
   return parsed.toString();
