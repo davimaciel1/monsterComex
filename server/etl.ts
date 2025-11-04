@@ -144,6 +144,16 @@ export async function processShipmentFile(filePath: string, ingestionId: number)
   try {
     console.log(`[ETL] Processing file: ${filePath}, ingestion ID: ${ingestionId}`);
     
+    const ingestion = await storage.getIngestionById(ingestionId);
+    if (!ingestion) {
+      throw new Error(`Ingestão ID ${ingestionId} não encontrada`);
+    }
+
+    const targetCompanyName = ingestion.targetCompanyName;
+    const targetCompanyKind = ingestion.targetCompanyKind as 'importer' | 'exporter' | null;
+
+    console.log(`[ETL] Target company: ${targetCompanyName} (${targetCompanyKind})`);
+    
     await storage.updateIngestion(ingestionId, {
       status: 'processing',
       startedAt: new Date(),
@@ -172,7 +182,7 @@ export async function processShipmentFile(filePath: string, ingestionId: number)
 
     for (let start = 0; start < rows.length; start += BATCH_SIZE) {
       const batch = rows.slice(start, start + BATCH_SIZE);
-      const { ok, failed } = await processShipmentBatch(batch, ingestionId, start);
+      const { ok, failed } = await processShipmentBatch(batch, ingestionId, start, targetCompanyName, targetCompanyKind);
       rowsOk += ok;
       rowsFailed += failed;
     }
@@ -256,6 +266,8 @@ async function processShipmentBatch(
   batch: ShipmentRow[],
   ingestionId: number,
   startIndex: number,
+  targetCompanyName?: string | null,
+  targetCompanyKind?: 'importer' | 'exporter' | null,
 ): Promise<{ ok: number; failed: number }> {
   let ok = 0;
   let failed = 0;
@@ -270,7 +282,7 @@ async function processShipmentBatch(
     const rowNumber = startIndex + idx + 1;
 
     try {
-      const prepared = prepareShipmentEntry(row, rowNumber, ingestionId);
+      const prepared = prepareShipmentEntry(row, rowNumber, ingestionId, targetCompanyName, targetCompanyKind);
       preparedEntries.push(prepared);
     } catch (error) {
       failed++;
@@ -371,12 +383,26 @@ async function processShipmentBatch(
   return { ok, failed };
 }
 
-function prepareShipmentEntry(row: ShipmentRow, rowNumber: number, ingestionId: number): PreparedShipmentEntry {
-  const companyKind = normalizeCompanyKind(row.company_kind);
-  const companyName = sanitizeString(row.company_name);
+function prepareShipmentEntry(
+  row: ShipmentRow, 
+  rowNumber: number, 
+  ingestionId: number,
+  targetCompanyName?: string | null,
+  targetCompanyKind?: 'importer' | 'exporter' | null
+): PreparedShipmentEntry {
+  let companyKind: string | undefined;
+  let companyName: string | undefined;
 
-  if (!companyName || !companyKind) {
-    throw new Error('Campos obrigatórios faltando: company_name, company_kind');
+  if (targetCompanyName && targetCompanyKind) {
+    companyName = targetCompanyName;
+    companyKind = targetCompanyKind;
+  } else {
+    companyKind = normalizeCompanyKind(row.company_kind);
+    companyName = sanitizeString(row.company_name);
+
+    if (!companyName || !companyKind) {
+      throw new Error('Campos obrigatórios faltando: company_name, company_kind');
+    }
   }
 
   const normalizedKind = companyKind.toLowerCase() as TradeRole;

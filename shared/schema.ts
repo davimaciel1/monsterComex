@@ -127,6 +127,8 @@ export const ingestions = pgTable("ingestions", {
   id: serial("id").primaryKey(),
   filename: text("filename").notNull(),
   status: text("status").notNull(), // 'queued', 'processing', 'done', 'failed', 'canceled'
+  targetCompanyName: text("target_company_name"),
+  targetCompanyKind: text("target_company_kind"),
   rowsTotal: integer("rows_total").notNull().default(0),
   rowsOk: integer("rows_ok").notNull().default(0),
   rowsFailed: integer("rows_failed").notNull().default(0),

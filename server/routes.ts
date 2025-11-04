@@ -1019,9 +1019,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Nenhum arquivo enviado" });
       }
 
+      const { targetCompanyName, targetCompanyKind } = req.body;
+      
+      if (!targetCompanyName || !targetCompanyKind) {
+        return res.status(400).json({ message: "Nome e tipo da empresa são obrigatórios" });
+      }
+
+      if (targetCompanyKind !== 'importer' && targetCompanyKind !== 'exporter') {
+        return res.status(400).json({ message: "Tipo de empresa deve ser 'importer' ou 'exporter'" });
+      }
+
       const ingestion = await storage.createIngestion({
         filename: req.file.originalname,
         status: 'queued',
+        targetCompanyName,
+        targetCompanyKind,
         rowsTotal: 0,
         rowsOk: 0,
         rowsFailed: 0,

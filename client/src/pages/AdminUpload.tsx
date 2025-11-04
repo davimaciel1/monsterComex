@@ -16,9 +16,11 @@ export default function AdminUpload() {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async ({ file, companyName, companyKind }: { file: File, companyName: string, companyKind: string }) => {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('targetCompanyName', companyName);
+      formData.append('targetCompanyKind', companyKind);
       
       const response = await fetch('/api/upload', {
         method: 'POST',
@@ -69,7 +71,7 @@ export default function AdminUpload() {
           </p>
         </div>
 
-        <UploadZone onFileSelect={(file) => uploadMutation.mutate(file)} />
+        <UploadZone onFileSelect={(file, companyName, companyKind) => uploadMutation.mutate({ file, companyName, companyKind })} />
 
         {isLoading ? (
           <div className="text-center py-12 text-muted-foreground">
