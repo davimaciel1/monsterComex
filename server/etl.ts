@@ -142,6 +142,8 @@ function normalizeShipmentRows(rows: ShipmentRow[]): ShipmentRow[] {
 
 export async function processShipmentFile(filePath: string, ingestionId: number): Promise<void> {
   try {
+    console.log(`[ETL] Processing file: ${filePath}, ingestion ID: ${ingestionId}`);
+    
     await storage.updateIngestion(ingestionId, {
       status: 'processing',
       startedAt: new Date(),
@@ -158,7 +160,11 @@ export async function processShipmentFile(filePath: string, ingestionId: number)
       throw new Error('Formato de arquivo não suportado');
     }
 
+    console.log(`[ETL] Read ${rows.length} raw rows from file`);
+
     rows = normalizeShipmentRows(rows);
+    
+    console.log(`[ETL] After normalization: ${rows.length} rows`);
 
     let rowsOk = 0;
     let rowsFailed = 0;
@@ -195,7 +201,16 @@ export async function processShipmentFile(filePath: string, ingestionId: number)
 }
 
 async function readExcelFile(filePath: string): Promise<ShipmentRow[]> {
+  console.log(`[ETL] Reading Excel file: ${filePath}`);
+  
+  if (!fs.existsSync(filePath)) {
+    console.error(`[ETL] File not found: ${filePath}`);
+    throw new Error(`Arquivo não encontrado: ${filePath}`);
+  }
+  
   const workbook = XLSX.readFile(filePath);
+  console.log(`[ETL] Workbook sheets: ${workbook.SheetNames.join(', ')}`);
+  
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
   
@@ -203,6 +218,11 @@ async function readExcelFile(filePath: string): Promise<ShipmentRow[]> {
     raw: false,
     defval: undefined,
   });
+  
+  console.log(`[ETL] Parsed ${data.length} rows from sheet "${sheetName}"`);
+  if (data.length > 0) {
+    console.log(`[ETL] First row keys:`, Object.keys(data[0]));
+  }
   
   return data;
 }
