@@ -87,6 +87,7 @@ export class DatabaseStorage implements IStorage {
     const { companies } = await import("@shared/schema");
     const { sql, ilike } = await import("drizzle-orm");
 
+    const likePattern = `%${trimmedQuery}%`;
     const trigramResults = await this.db.execute(sql`
       select
         c.id,
@@ -94,9 +95,9 @@ export class DatabaseStorage implements IStorage {
         c.kind,
         c.country_code as "countryCode",
         c.created_at as "createdAt",
-        word_similarity(c.name, ${trimmedQuery}) as score
+        word_similarity(${trimmedQuery}, c.name) as score
       from companies c
-      where c.name % ${trimmedQuery}
+      where ${trimmedQuery} <% c.name OR LOWER(c.name) LIKE LOWER(${likePattern})
       order by score desc
       limit ${limit}
     `);
