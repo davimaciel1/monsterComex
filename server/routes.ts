@@ -375,10 +375,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/plans/quote", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: false });
-    if (!auth) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res, { loadContext: false });
+      if (!auth) return;
+
       const payload = planSchema.parse(req.body);
       const quote = calculatePlanQuote({
         importerSlots: payload.importerQuota,
@@ -406,10 +406,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/plans/subscribe", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res, { loadContext: false });
-    if (!auth) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res, { loadContext: false });
+      if (!auth) return;
+
       const payload = planSchema.parse(req.body);
       const totalUnits = payload.importerQuota + payload.exporterQuota + payload.ncmQuota;
       if (totalUnits <= 0) {
@@ -549,10 +549,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
 
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
       if (access.error || !access.company) {
         return res.status(access.error?.status ?? 500).json({ message: access.error?.message || "Falha ao consultar a empresa." });
@@ -579,10 +579,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(sample.metrics);
     }
 
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
       if (access.error) {
         return res.status(access.error.status).json({ message: access.error.message });
@@ -610,10 +610,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(sample.shipmentsOverTime);
     }
 
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
       if (access.error) {
         return res.status(access.error.status).json({ message: access.error.message });
@@ -643,10 +643,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(sample.topPartners.slice(0, Number.isNaN(limit) ? 5 : limit));
     }
 
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
       if (access.error) {
         return res.status(access.error.status).json({ message: access.error.message });
@@ -676,10 +676,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(sample.topOriginCountries.slice(0, Number.isNaN(limit) ? 5 : limit));
     }
 
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
       if (access.error) {
         return res.status(access.error.status).json({ message: access.error.message });
@@ -709,10 +709,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(sample.topDestinationPorts.slice(0, Number.isNaN(limit) ? 5 : limit));
     }
 
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
       if (access.error) {
         return res.status(access.error.status).json({ message: access.error.message });
@@ -742,10 +742,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(sample.topHSCodes.slice(0, Number.isNaN(limit) ? 5 : limit));
     }
 
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
       if (access.error) {
         return res.status(access.error.status).json({ message: access.error.message });
@@ -781,10 +781,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
 
-    const auth = await ensureAuthenticated(req, res, { loadContext: true });
-    if (!auth || !auth.context) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res, { loadContext: true });
+      if (!auth || !auth.context) return;
+
       const access = await ensureCompanyAccess(auth.user.id, companyId, auth.context);
       if (access.error) {
         return res.status(access.error.status).json({ message: access.error.message });
@@ -921,10 +921,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/ingestions", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res);
-    if (!auth) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res);
+      if (!auth) return;
+
       const limit = Number.parseInt(String(req.query.limit ?? "20"), 10);
       const offset = Number.parseInt(String(req.query.offset ?? "0"), 10);
 
@@ -936,10 +936,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/ingestions/:id", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res);
-    if (!auth) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res);
+      if (!auth) return;
+
       const id = Number.parseInt(req.params.id, 10);
       if (Number.isNaN(id)) {
         return res.status(400).json({ message: "Identificador inválido." });
@@ -958,10 +958,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/ingestions/:id/errors", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res);
-    if (!auth) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res);
+      if (!auth) return;
+
       const id = Number.parseInt(req.params.id, 10);
       if (Number.isNaN(id)) {
         return res.status(400).json({ message: "Identificador inválido." });
@@ -975,10 +975,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/ingestions", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res);
-    if (!auth) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res);
+      if (!auth) return;
+
       const ingestion = await storage.createIngestion({
         filename: req.body.filename,
         status: 'queued',
@@ -994,10 +994,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/ingestions/:id", async (req, res) => {
-    const auth = await ensureAuthenticated(req, res);
-    if (!auth) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res);
+      if (!auth) return;
+
       const id = Number.parseInt(req.params.id, 10);
       if (Number.isNaN(id)) {
         return res.status(400).json({ message: "Identificador inválido." });
@@ -1011,10 +1011,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/upload", upload.single('file'), async (req, res) => {
-    const auth = await ensureAuthenticated(req, res);
-    if (!auth) return;
-
     try {
+      const auth = await ensureAuthenticated(req, res);
+      if (!auth) return;
+
       if (!req.file) {
         return res.status(400).json({ message: "Nenhum arquivo enviado" });
       }
